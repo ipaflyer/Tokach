@@ -348,6 +348,15 @@ function disableAllCards() {
   }
 }
 
+function markStrike(player, card) {
+  const container = player === "A" ? els.buttonsA : els.buttonsB;
+  for (const btn of container.children) {
+    if (btn.dataset.force === String(card)) {
+      btn.classList.add("striking");
+    }
+  }
+}
+
 function buildButtons(container, player, hand, enabled, tone, toneLocked) {
   container.innerHTML = "";
   const hasOther =
@@ -357,8 +366,16 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
   for (let card = 1; card <= 4; card += 1) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "card-btn";
-    btn.textContent = String(card);
+    btn.className = `card-btn force-${card} side-${player}`;
+    btn.dataset.force = String(card);
+    const force = document.createElement("span");
+    force.className = "force";
+    force.textContent = String(card);
+    const forceLabel = document.createElement("span");
+    forceLabel.className = "force-label";
+    forceLabel.textContent = "удар";
+    btn.appendChild(force);
+    btn.appendChild(forceLabel);
     const hasCard = hand.includes(card);
     const blockedByLock = toneLocked && tone !== null && card === tone && hasOther;
     const stealReady =
@@ -369,10 +386,15 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
       card === tone;
     const inactiveOrMissing = !enabled || !hasCard;
     btn.disabled = inactiveOrMissing || blockedByLock;
+    if (!hasCard) {
+      btn.classList.add("spent");
+      forceLabel.textContent = "сброс";
+    }
     if (enabled && blockedByLock) {
       btn.classList.add("locked-match");
+      forceLabel.textContent = "замок";
       btn.title = "тон закрыт — сыграй другое число";
-      btn.setAttribute("aria-label", `карта ${card}, замок тона`);
+      btn.setAttribute("aria-label", `удар ${card}, замок тона`);
       // disabled не кликается — оставляем клик только для объяснения
       btn.disabled = false;
       btn.setAttribute("aria-disabled", "true");
@@ -382,8 +404,9 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
       });
     } else if (stealReady) {
       btn.classList.add("steal-ready");
+      forceLabel.textContent = "кража";
       btn.title = "кража: сдвиг ×2, тон сгорит";
-      btn.setAttribute("aria-label", `карта ${card}, доступна кража`);
+      btn.setAttribute("aria-label", `удар ${card}, доступна кража`);
       btn.addEventListener("click", () => onPlay(card));
       bindPreview(btn, card);
     } else if (enabled && hasCard) {
@@ -488,6 +511,7 @@ function onPlay(card) {
   }
 
   animating = true;
+  markStrike(result.moveRecord.player, card);
   disableAllCards();
   els.lastMove.textContent = lastMoveText;
   animatePush(result.moveRecord, () => {
