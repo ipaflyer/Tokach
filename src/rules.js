@@ -153,6 +153,46 @@ function applyShift(player, position, shift) {
   return player === "A" ? position - shift : position + shift;
 }
 
+function previewCard(session, card) {
+  if (session.finished) {
+    return { ok: false, error: "сессия окончена" };
+  }
+  const stone = session.stone;
+  const player = stone.currentPlayer;
+  const hand = stone.hands[player];
+  if (hand.indexOf(card) === -1) {
+    return { ok: false, error: "карты нет в руке" };
+  }
+  if (stone.toneLocked && stone.tone !== null && card === stone.tone && stone.moveCount > 0) {
+    const hasOther = hand.some((value) => value !== stone.tone);
+    if (hasOther) {
+      return { ok: false, error: "тон закрыт — сыграй другое число", blocked: true };
+    }
+  }
+  const isOpening = stone.moveCount === 0;
+  const { shift, nextTone, nextLocked, moveType } = computeShift(
+    card,
+    stone.tone,
+    stone.toneLocked,
+    session.resonance,
+    isOpening
+  );
+  const finishingMove = wouldPushOut(player, stone.position, shift);
+  const positionAfter = applyShift(player, stone.position, shift);
+  return {
+    ok: true,
+    player,
+    card,
+    shift,
+    moveType,
+    positionBefore: stone.position,
+    positionAfter,
+    finishingMove,
+    nextTone,
+    nextLocked,
+  };
+}
+
 function playCard(session, card) {
   if (session.finished) {
     return { ok: false, error: "сессия окончена" };
@@ -377,6 +417,20 @@ function runSelfChecks() {
       throw new Error(message);
     }
   }
+
+  check("preview совпадает с фактическим ходом", () => {
+    const session = createSession();
+    const preview = previewCard(session, 2);
+    assert(preview.ok, "preview opening");
+    assert(preview.moveType === "opening", "preview opening type");
+    assert(preview.shift === 2, "preview shift 2");
+    assert(preview.positionAfter === -3, "preview −1−2");
+    const result = playCard(session, 2);
+    assert(result.moveRecord.shift === preview.shift, "shift совпал");
+    assert(result.moveRecord.positionAfter === preview.positionAfter, "посадка совпала");
+    const locked = previewCard(session, 2);
+    assert(locked.ok === false && locked.blocked === true, "preview видит замок");
+  });
 
   check("opening: задаёт закрытый тон", () => {
     const session = createSession();
@@ -666,6 +720,7 @@ window.TokachRules = {
   createSession,
   setResonance,
   playCard,
+  previewCard,
   getPublicState,
   firstPlayerForStone,
   runSelfChecks,

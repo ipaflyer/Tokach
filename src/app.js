@@ -10,6 +10,7 @@ let sessionLog = null;
 let lastMoveText = "—";
 let animating = false;
 let animToken = 0;
+let lastBurst = { className: "", text: "" };
 
 const CELL_MIN = -6;
 const CELL_MAX = 6;
@@ -208,18 +209,82 @@ function pathCells(from, to) {
   return cells;
 }
 
+function moveKindLabel(moveType) {
+  if (moveType === "steal") {
+    return "кража";
+  }
+  if (moveType === "opening") {
+    return "opening";
+  }
+  if (moveType === "rewrite") {
+    return "перепись";
+  }
+  if (moveType === "setup") {
+    return "setup";
+  }
+  return moveType;
+}
+
 function showPushBurst(record) {
   const dir = record.player === "A" ? "←" : "→";
-  let kind = "setup";
-  if (record.moveType === "steal") {
-    kind = "кража";
-  } else if (record.moveType === "opening") {
-    kind = "opening";
-  } else if (record.moveType === "rewrite") {
-    kind = "перепись";
-  }
+  const kind = moveKindLabel(record.moveType);
   els.pushBurst.className = record.moveType;
   els.pushBurst.textContent = `${dir} ${record.shift} · ${kind}`;
+  lastBurst = {
+    className: els.pushBurst.className,
+    text: els.pushBurst.textContent,
+  };
+}
+
+function showPreview(preview) {
+  clearBoardMarks(["preview", "preview-finish"]);
+  if (!preview || !preview.ok || animating) {
+    return;
+  }
+  const mark = preview.finishingMove ? "preview-finish" : "preview";
+  const path = pathCells(preview.positionBefore, preview.positionAfter);
+  for (const pos of path) {
+    const el = cellEl(pos);
+    if (el) {
+      el.classList.add(mark);
+    }
+  }
+  const dest = preview.finishingMove
+    ? preview.positionAfter < 0
+      ? CELL_MIN
+      : CELL_MAX
+    : preview.positionAfter;
+  const destEl = cellEl(clampCell(dest));
+  if (destEl) {
+    destEl.classList.add(mark);
+  }
+  const dir = preview.player === "A" ? "←" : "→";
+  const kind = moveKindLabel(preview.moveType);
+  els.pushBurst.className = preview.moveType;
+  els.pushBurst.textContent = preview.finishingMove
+    ? `${dir} ${preview.shift} · ${kind} · за край`
+    : `${dir} ${preview.shift} · ${kind} → ${preview.positionAfter}`;
+}
+
+function clearPreview() {
+  if (animating) {
+    return;
+  }
+  clearBoardMarks(["preview", "preview-finish"]);
+  els.pushBurst.className = lastBurst.className;
+  els.pushBurst.textContent = lastBurst.text;
+}
+
+function bindPreview(btn, card) {
+  btn.addEventListener("mouseenter", () => {
+    if (animating || !session) {
+      return;
+    }
+    showPreview(Rules.previewCard(session, card));
+  });
+  btn.addEventListener("mouseleave", () => {
+    clearPreview();
+  });
 }
 
 function animatePush(record, done) {
@@ -320,6 +385,10 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
       btn.title = "кража: сдвиг ×2, тон сгорит";
       btn.setAttribute("aria-label", `карта ${card}, доступна кража`);
       btn.addEventListener("click", () => onPlay(card));
+      bindPreview(btn, card);
+    } else if (enabled && hasCard) {
+      btn.addEventListener("click", () => onPlay(card));
+      bindPreview(btn, card);
     } else {
       btn.addEventListener("click", () => onPlay(card));
     }
@@ -388,6 +457,7 @@ function startNewSession() {
   session = Rules.createSession({ resonance });
   sessionLog = Log.createSessionLog(session.sessionId, session.resonance);
   lastMoveText = "—";
+  lastBurst = { className: "", text: "" };
   els.pushBurst.className = "";
   els.pushBurst.textContent = "";
   els.notesForm.reset();
