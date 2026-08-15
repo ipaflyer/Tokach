@@ -98,6 +98,7 @@ function react(event) {
     "weak-capture": "слабо — груз не взялся",
     snap: event.reason === "cancel" ? "черта брошена" : "черта лопнула",
     "leak-warn": "обводи — не стой в сгустке",
+    "ghost-enter": "тень вышла на твой старый путь",
     won: "ты вышел с грузом",
     lost:
       event.reason === "collapse"
@@ -130,6 +131,9 @@ function react(event) {
   } else if (event.type === "leak-warn") {
     burst(event.x, event.y, "#86efac", 8);
     blip(180, 0.12, "sine");
+  } else if (event.type === "ghost-enter") {
+    burst(event.x, event.y, "#fb7185", 16);
+    blip(140, 0.18, "sine");
   } else if (event.type === "won") {
     blip(523, 0.3, "triangle");
   } else if (event.type === "lost") {
@@ -158,7 +162,7 @@ function startRun() {
   last = performance.now();
   hideOverlay();
   hud.event.textContent = run.ghost
-    ? "в доме ходит твой прошлый обвод"
+    ? "сначала сгусток — тень выйдет по старому пути"
     : "замкни черту вокруг сгустка";
   hud.hint.textContent = "WASD / стрелки — идти · Пробел — бросить черту";
   cam.x = run.player.x;

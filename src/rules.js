@@ -25,6 +25,7 @@ const BALANCE = Object.freeze({
   leakTouchTime: 1.6,
   ghostSpeed: 195,
   ghostRadius: 12,
+  ghostDelay: 9,
   snapSpentRadius: 22,
 });
 
@@ -140,7 +141,7 @@ function createRun(options = {}) {
     ghostPoints,
     ghostIndex: 0,
     ghost: ghostPoints.length
-      ? { x: ghostPoints[0].x, y: ghostPoints[0].y, alive: true }
+      ? { x: ghostPoints[0].x, y: ghostPoints[0].y, alive: false }
       : null,
     recorded: [],
     status: "running",
@@ -422,6 +423,21 @@ function ghostTrailIndex(run) {
   return -1;
 }
 
+function wakeGhost(run) {
+  if (!run.ghost || run.ghost.alive) {
+    return;
+  }
+  if (run.time < BALANCE.ghostDelay) {
+    return;
+  }
+  run.ghost.alive = true;
+  emit(run, {
+    type: "ghost-enter",
+    x: run.ghost.x,
+    y: run.ghost.y,
+  });
+}
+
 function stepGhost(run, dt) {
   if (!run.ghost || !run.ghost.alive || run.ghostPoints.length < 2) {
     return;
@@ -542,6 +558,7 @@ function stepRun(run, input, dt) {
     bounceLeak(run, run.leaks[i], sliced);
   }
 
+  wakeGhost(run);
   stepGhost(run, sliced);
   const ghostIdx = ghostTrailIndex(run);
   if (ghostIdx >= 0) {
@@ -853,6 +870,28 @@ function runSelfChecks() {
     assert(run.stats.snaps === 0, `срыв ${run.stats.snaps}`);
     assert(run.stats.burns >= 1, "должен выжечь учебный сгусток");
     assert(leak.alive === false, "сгусток во входе сгорает");
+  });
+
+  check("тень не перехватывает первый обвод", () => {
+    const run = createRun({ ghostPoints: [] });
+    const leak = run.leaks[0];
+    const path = [];
+    for (let y = 400; y <= 720; y += 8) {
+      path.push({ x: leak.x, y });
+    }
+    run.ghostPoints = path;
+    run.ghostIndex = 0;
+    run.ghost = { x: path[0].x, y: path[0].y, alive: false };
+    walkSquare(run, leak.x, leak.y, 80);
+    assert(run.time < BALANCE.ghostDelay, `первый обвод ${run.time.toFixed(2)}с`);
+    assert(run.ghost.alive === false, "тень ещё не вышла");
+    assert(run.stats.burns >= 1, "должен выжечь сгусток");
+    assert(leak.alive === false, "сгусток сгорает, не тень");
+    assert(!run.lastEvent || run.lastEvent.ghost !== true, "это не выжигание тени");
+    while (run.time < BALANCE.ghostDelay + 0.1) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
+    }
+    assert(run.ghost.alive === true, "тень выходит после паузы");
   });
 
   check("касание сгустка не убивает сразу", () => {
