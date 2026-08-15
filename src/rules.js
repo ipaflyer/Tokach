@@ -73,7 +73,7 @@ function buildDistrict() {
     exit: rect(70, 330, 250, 230),
     cargo: { x: 1860, y: 470, r: 16 },
     leaks: [
-      { x: 252, y: 640, vx: 20, vy: 16 },
+      { x: 252, y: 640, vx: 0, vy: 0 },
       { x: 780, y: 820, vx: -16, vy: 12 },
       { x: 1380, y: 470, vx: 10, vy: -22 },
     ],
@@ -822,6 +822,37 @@ function runSelfChecks() {
     assert(run.stats.closes === 0, "три стороны ещё не контур");
     walkTo(run, { x: 160, y: 332 }, 200);
     assert(run.stats.closes >= 1, "в кольце 34 px контур должен закрыться");
+  });
+
+  check("первый обвод сгустка во входе не рвётся", () => {
+    const run = createRun({ ghostPoints: [] });
+    const leak = run.leaks[0];
+    const half = 88;
+    let t = 0;
+    for (let i = 0; i < 240; i += 1) {
+      const phase = t % 6;
+      const corners = [
+        { x: leak.x - half, y: leak.y - half },
+        { x: leak.x + half, y: leak.y - half },
+        { x: leak.x + half, y: leak.y + half },
+        { x: leak.x - half, y: leak.y + half },
+      ];
+      const idx = Math.min(3, Math.floor(phase));
+      const target = corners[idx];
+      stepRun(
+        run,
+        {
+          ax: target.x - run.player.x,
+          ay: target.y - run.player.y,
+          cancel: false,
+        },
+        1 / 30
+      );
+      t += 1 / 30;
+    }
+    assert(run.stats.snaps === 0, `срыв ${run.stats.snaps}`);
+    assert(run.stats.burns >= 1, "должен выжечь учебный сгусток");
+    assert(leak.alive === false, "сгусток во входе сгорает");
   });
 
   check("касание сгустка не убивает сразу", () => {
