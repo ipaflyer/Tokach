@@ -580,6 +580,20 @@ function stepRun(run, input, dt) {
   return run.lastEvent;
 }
 
+function closeHintFor(run) {
+  if (run.trail.length < 8 || run.trailLen < BALANCE.minLoopPath) {
+    return null;
+  }
+  const start = run.trail[0];
+  const distance = Geom.dist(run.player, start);
+  return {
+    x: start.x,
+    y: start.y,
+    dist: distance,
+    near: distance <= BALANCE.closeRadius * 4,
+  };
+}
+
 function getPublicState(run) {
   return {
     status: run.status,
@@ -601,6 +615,7 @@ function getPublicState(run) {
     world: WORLD,
     balance: BALANCE,
     hasGhost: Boolean(run.ghost && run.ghost.alive),
+    closeHint: closeHintFor(run),
   };
 }
 
@@ -769,6 +784,19 @@ function runSelfChecks() {
       run.trail.length >= 4 || run.stats.closes > 0,
       "черта остаётся или тень закрыла форму, но не срыв"
     );
+  });
+
+  check("подсказка замыкания появляется на длинной черте", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    assert(getPublicState(run).closeHint === null, "в начале подсказки нет");
+    walkTo(run, { x: 188, y: 300 }, 400);
+    walkTo(run, { x: 330, y: 300 }, 400);
+    const hint = getPublicState(run).closeHint;
+    assert(hint !== null, "на длинной черте должна быть точка замыкания");
+    assert(Math.abs(hint.x - run.trail[0].x) < 1, "точка — начало черты");
   });
 
   return results;

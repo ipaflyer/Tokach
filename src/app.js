@@ -347,6 +347,37 @@ function drawWorld(state) {
     ctx.shadowBlur = 0;
   }
 
+  if (state.closeHint) {
+    const hint = state.closeHint;
+    const hp = worldToScreen(hint.x, hint.y);
+    const pl2 = worldToScreen(state.player.x, state.player.y);
+    const pulse = 10 + Math.sin(t * 7) * 4 + (hint.near ? 6 : 0);
+    ctx.setLineDash([10, 8]);
+    ctx.strokeStyle = hint.near ? "rgba(253, 224, 71, 0.95)" : "rgba(253, 224, 71, 0.45)";
+    ctx.lineWidth = hint.near ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(pl2.x, pl2.y);
+    ctx.lineTo(hp.x, hp.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 22;
+    ctx.shadowColor = "#fde047";
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#fef9c3";
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "700 15px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fef08a";
+    ctx.fillText("замкни", hp.x, hp.y - pulse - 8);
+  }
+
   for (let i = 0; i < state.leaks.length; i += 1) {
     const leak = state.leaks[i];
     if (!leak.alive) {
@@ -562,6 +593,11 @@ function tick(now) {
   hud.trailFill.style.width = `${Math.round((state.trailLen / state.maxTrailLen) * 100)}%`;
   hud.cargo.textContent = state.cargo.held ? "груз у тебя — к выходу" : "груз в кладовой";
   hud.cargo.classList.toggle("held", state.cargo.held);
+  if (state.closeHint) {
+    hud.hint.textContent = state.closeHint.near
+      ? "ещё чуть — замкнёшь контур"
+      : "жёлтая точка — вернись туда и замкни";
+  }
 
   drawWorld(state);
   drawMinimap(state);
