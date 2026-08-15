@@ -9,7 +9,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-HOST = os.environ.get("HOST", "127.0.0.1")
+# 0.0.0.0 — иначе Cursor не пробросит порт в браузер на твоей машине.
+HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8765"))
 INDEX = ROOT / "index.html"
 
@@ -50,7 +51,7 @@ class Handler(SimpleHTTPRequestHandler):
             "padding:2rem;max-width:40rem'>"
             "<h1>Это не страница игры</h1>"
             "<p>Сервер живой, но по этому адресу файла нет.</p>"
-            f"<p>Открой <a href='/' style='color:#5eead4'>http://{HOST}:{PORT}/</a></p>"
+            f"<p>Открой <a href='/' style='color:#5eead4'>http://127.0.0.1:{PORT}/</a></p>"
             f"<p style='color:#9bb0c9'>Корень раздачи: {ROOT}</p>"
             "<p>На своём компьютере не указывай <code>--directory /workspace</code> "
             "— этой папки у тебя нет. Запускай <code>python3 serve.py</code> "
@@ -69,7 +70,14 @@ def main() -> int:
         print(f"Нет {INDEX}. Этот скрипт должен лежать рядом с index.html.", file=sys.stderr)
         return 1
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Обвод: http://{HOST}:{PORT}/  (файлы из {ROOT})")
+    httpd.allow_reuse_address = True
+    print(f"Обвод слушает {HOST}:{PORT}, файлы из {ROOT}")
+    print(f"Открой http://127.0.0.1:{PORT}/")
+    print(
+        "Если снова белый Python 404 — на твоём компьютере уже занят порт "
+        f"{PORT}. Убей свой `python3 -m http.server` и открой порт через "
+        "иконку штекера в Cursor (Agents → Ports)."
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
