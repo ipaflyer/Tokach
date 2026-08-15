@@ -8,6 +8,12 @@ const Log = window.TokachLog;
 let session = null;
 let sessionLog = null;
 let lastMoveText = "—";
+let animating = false;
+let animToken = 0;
+let lastBurst = { className: "", text: "" };
+
+const CELL_MIN = -6;
+const CELL_MAX = 6;
 
 const els = {
   resonanceSelect: document.getElementById("resonanceSelect"),
@@ -17,6 +23,9 @@ const els = {
   scoreB: document.getElementById("scoreB"),
   currentPlayer: document.getElementById("currentPlayer"),
   toneLabel: document.getElementById("toneLabel"),
+  toneHint: document.getElementById("toneHint"),
+  toneBanner: document.getElementById("toneBanner"),
+  decisionHint: document.getElementById("decisionHint"),
   board: document.getElementById("board"),
   lastMove: document.getElementById("lastMove"),
   handA: document.getElementById("handA"),
@@ -33,6 +42,7 @@ const els = {
   finalScore: document.getElementById("finalScore"),
   selfCheckBtn: document.getElementById("selfCheckBtn"),
   selfCheckOut: document.getElementById("selfCheckOut"),
+  pushBurst: document.getElementById("pushBurst"),
 };
 
 function formatHand(cards) {
@@ -48,6 +58,53 @@ function formatTone(tone, locked) {
     return "молчит";
   }
   return locked ? `${tone} (закрыт)` : String(tone);
+}
+
+function updateToneBanner(tone, locked) {
+  els.toneBanner.classList.remove("silent", "locked", "open");
+  if (tone === null) {
+    els.toneBanner.classList.add("silent");
+    els.toneLabel.textContent = "Тон молчит";
+    els.toneHint.textContent = "первый удар задаст закрытый тон";
+    return;
+  }
+  if (locked) {
+    els.toneBanner.classList.add("locked");
+    els.toneLabel.textContent = `Тон ${tone} · закрыт`;
+    els.toneHint.textContent = "совпадение запрещено — сыграй другое число";
+    return;
+  }
+  els.toneBanner.classList.add("open");
+  els.toneLabel.textContent = `Тон ${tone} · открыт`;
+  els.toneHint.textContent = "совпадение = кража ×2, иначе перепись";
+}
+
+function updateDecisionHint(state) {
+  if (state.finished) {
+    els.decisionHint.textContent = "сессия окончена — заполни заметки плейтеста";
+    return;
+  }
+  const stone = state.stone;
+  const hand = stone.hands[stone.currentPlayer];
+  if (stone.tone === null) {
+    els.decisionHint.textContent =
+      stone.moveCount === 0
+        ? "Opening: сила удара станет закрытым тоном"
+        : "Тишина: любой удар — setup, тон откроется";
+    return;
+  }
+  if (stone.toneLocked) {
+    const blocked = hand.includes(stone.tone) && hand.some((card) => card !== stone.tone);
+    els.decisionHint.textContent = blocked
+      ? `Замок: карта ${stone.tone} недоступна, пока есть другое число`
+      : `Замок: в руке только ${stone.tone} — можно сыграть (unlock через rewrite)`;
+    return;
+  }
+  if (hand.includes(stone.tone)) {
+    els.decisionHint.textContent = `Развилка: украсть ${stone.tone} (×2) или переписать другим числом`;
+    return;
+  }
+  els.decisionHint.textContent = `Перепись: тон ${stone.tone} в руке нет — ставь свой крючок`;
 }
 
 function describeMove(record) {
@@ -75,21 +132,291 @@ function describeMove(record) {
   return parts.join(" · ");
 }
 
-function buildBoard(position) {
+function cellEl(position) {
+  return els.board.querySelector(`[data-pos="${position}"]`);
+}
+
+function clampCell(position) {
+  return Math.max(CELL_MIN, Math.min(CELL_MAX, position));
+}
+
+function buildBoardSkeleton() {
+  if (els.board.dataset.ready === "tone-1") {
+    return;
+  }
   els.board.innerHTML = "";
-  for (let cell = -6; cell <= 6; cell += 1) {
+  for (let cell = CELL_MIN; cell <= CELL_MAX; cell += 1) {
     const div = document.createElement("div");
     div.className = "cell";
-    if (cell === -6 || cell === 6) {
+    div.dataset.pos = String(cell);
+    if (cell === CELL_MIN || cell === CELL_MAX) {
       div.classList.add("edge");
     }
-    if (cell === position) {
-      div.classList.add("stone");
-      div.textContent = "●";
-    } else {
-      div.textContent = String(cell);
+    if (cell < 0) {
+      div.classList.add("neg-side");
+    } else if (cell > 0) {
+      div.classList.add("pos-side");
     }
+    const label = document.createElement("span");
+    label.className = "cell-label";
+    label.textContent = String(cell);
+    const token = document.createElement("span");
+    token.className = "token";
+    token.hidden = true;
+    const brand = document.createElement("span");
+    brand.className = "brand";
+    brand.hidden = true;
+    token.appendChild(brand);
+    div.appendChild(label);
+    div.appendChild(token);
     els.board.appendChild(div);
+  }
+  els.board.dataset.ready = "tone-1";
+}
+
+function clearBoardMarks(kinds) {
+  for (const el of els.board.children) {
+    el.classList.remove(...kinds);
+    if (kinds.includes("stone")) {
+      el.classList.remove("brand-silent", "brand-locked", "brand-open", "brand-burn");
+      const token = el.querySelector(".token");
+      if (token) {
+        token.hidden = true;
+      }
+      const brand = el.querySelector(".brand");
+      if (brand) {
+        brand.hidden = true;
+        brand.textContent = "";
+      }
+    }
+  }
+}
+
+function paintBrand(el, brand, burned) {
+  const mark = el.querySelector(".brand");
+  el.classList.remove("brand-silent", "brand-locked", "brand-open", "brand-burn");
+  if (!mark) {
+    return;
+  }
+  if (burned && brand && brand.tone !== null) {
+    mark.hidden = false;
+    mark.textContent = String(brand.tone);
+    el.classList.add("brand-burn");
+    return;
+  }
+  if (!brand || brand.tone === null) {
+    mark.hidden = true;
+    mark.textContent = "";
+    el.classList.add("brand-silent");
+    return;
+  }
+  mark.hidden = false;
+  mark.textContent = String(brand.tone);
+  el.classList.add(brand.locked ? "brand-locked" : "brand-open");
+}
+
+function placeStone(position, extras, brand, burned) {
+  const el = cellEl(clampCell(position));
+  if (!el) {
+    return;
+  }
+  el.classList.add("stone", ...(extras || []));
+  const token = el.querySelector(".token");
+  if (token) {
+    token.hidden = false;
+  }
+  paintBrand(el, brand, burned);
+}
+
+function brandAfterFrom(record) {
+  if (record.toneAfter === null) {
+    return { tone: null, locked: false };
+  }
+  return {
+    tone: record.toneAfter,
+    locked: record.moveType === "opening",
+  };
+}
+
+function pathCells(from, to) {
+  const cells = [];
+  if (from === to) {
+    return cells;
+  }
+  const step = to > from ? 1 : -1;
+  for (let pos = from + step; pos !== to + step; pos += step) {
+    if (pos < CELL_MIN || pos > CELL_MAX) {
+      continue;
+    }
+    cells.push(pos);
+  }
+  return cells;
+}
+
+function moveKindLabel(moveType) {
+  if (moveType === "steal") {
+    return "кража";
+  }
+  if (moveType === "opening") {
+    return "opening";
+  }
+  if (moveType === "rewrite") {
+    return "перепись";
+  }
+  if (moveType === "setup") {
+    return "setup";
+  }
+  return moveType;
+}
+
+function showPushBurst(record) {
+  const dir = record.player === "A" ? "←" : "→";
+  const kind = moveKindLabel(record.moveType);
+  els.pushBurst.className = record.moveType;
+  els.pushBurst.textContent = `${dir} ${record.shift} · ${kind}`;
+  lastBurst = {
+    className: els.pushBurst.className,
+    text: els.pushBurst.textContent,
+  };
+}
+
+function showPreview(preview) {
+  clearBoardMarks(["preview", "preview-finish"]);
+  if (!preview || !preview.ok || animating) {
+    return;
+  }
+  const mark = preview.finishingMove ? "preview-finish" : "preview";
+  const path = pathCells(preview.positionBefore, preview.positionAfter);
+  for (const pos of path) {
+    const el = cellEl(pos);
+    if (el) {
+      el.classList.add(mark);
+    }
+  }
+  const dest = preview.finishingMove
+    ? preview.positionAfter < 0
+      ? CELL_MIN
+      : CELL_MAX
+    : preview.positionAfter;
+  const destEl = cellEl(clampCell(dest));
+  if (destEl) {
+    destEl.classList.add(mark);
+  }
+  const dir = preview.player === "A" ? "←" : "→";
+  const kind = moveKindLabel(preview.moveType);
+  els.pushBurst.className = preview.moveType;
+  els.pushBurst.textContent = preview.finishingMove
+    ? `${dir} ${preview.shift} · ${kind} · за край`
+    : `${dir} ${preview.shift} · ${kind} → ${preview.positionAfter}`;
+}
+
+function clearPreview() {
+  if (animating) {
+    return;
+  }
+  clearBoardMarks(["preview", "preview-finish"]);
+  els.pushBurst.className = lastBurst.className;
+  els.pushBurst.textContent = lastBurst.text;
+}
+
+function bindPreview(btn, card) {
+  btn.addEventListener("mouseenter", () => {
+    if (animating || !session) {
+      return;
+    }
+    showPreview(Rules.previewCard(session, card));
+  });
+  btn.addEventListener("mouseleave", () => {
+    clearPreview();
+  });
+}
+
+function animatePush(record, brandBefore, done) {
+  const token = (animToken += 1);
+  const brandAfter = brandAfterFrom(record);
+  buildBoardSkeleton();
+  clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
+  placeStone(record.positionBefore, [], brandBefore);
+  showPushBurst(record);
+  const path = pathCells(record.positionBefore, record.positionAfter);
+  const steal = record.moveType === "steal";
+  for (const pos of path) {
+    const el = cellEl(pos);
+    if (el) {
+      el.classList.add(steal ? "path-steal" : "path");
+    }
+  }
+  const offBoard = record.positionAfter < CELL_MIN || record.positionAfter > CELL_MAX;
+  const interval = steal ? 120 : 170;
+  let index = 0;
+
+  function finish() {
+    if (token !== animToken) {
+      return;
+    }
+    done();
+  }
+
+  function landAt(position, extras) {
+    if (steal) {
+      placeStone(position, extras, brandBefore, true);
+      window.setTimeout(() => {
+        if (token !== animToken) {
+          return;
+        }
+        const el = cellEl(clampCell(position));
+        if (el) {
+          paintBrand(el, brandAfter);
+        }
+        window.setTimeout(finish, 220);
+      }, 200);
+      return;
+    }
+    placeStone(position, extras, brandAfter);
+    window.setTimeout(finish, 380);
+  }
+
+  function step() {
+    if (token !== animToken) {
+      return;
+    }
+    if (index >= path.length) {
+      clearBoardMarks(["stone", "impact", "fallen"]);
+      if (offBoard) {
+        landAt(record.positionAfter < 0 ? CELL_MIN : CELL_MAX, ["impact", "fallen"]);
+      } else {
+        landAt(record.positionAfter, ["impact"]);
+      }
+      return;
+    }
+    clearBoardMarks(["stone", "impact", "fallen"]);
+    const extras = index === path.length - 1 && !offBoard ? ["impact"] : [];
+    placeStone(path[index], extras, brandBefore);
+    index += 1;
+    window.setTimeout(step, interval);
+  }
+
+  window.setTimeout(step, 100);
+}
+
+function updateBoard(position, brand) {
+  buildBoardSkeleton();
+  clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
+  placeStone(position, [], brand);
+}
+
+function disableAllCards() {
+  for (const btn of [...els.buttonsA.children, ...els.buttonsB.children]) {
+    btn.disabled = true;
+  }
+}
+
+function markStrike(player, card) {
+  const container = player === "A" ? els.buttonsA : els.buttonsB;
+  for (const btn of container.children) {
+    if (btn.dataset.force === String(card)) {
+      btn.classList.add("striking");
+    }
   }
 }
 
@@ -102,14 +429,55 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
   for (let card = 1; card <= 4; card += 1) {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = String(card);
+    btn.className = `card-btn force-${card} side-${player}`;
+    btn.dataset.force = String(card);
+    const force = document.createElement("span");
+    force.className = "force";
+    force.textContent = String(card);
+    const forceLabel = document.createElement("span");
+    forceLabel.className = "force-label";
+    forceLabel.textContent = "удар";
+    btn.appendChild(force);
+    btn.appendChild(forceLabel);
     const hasCard = hand.includes(card);
     const blockedByLock = toneLocked && tone !== null && card === tone && hasOther;
-    btn.disabled = !enabled || !hasCard || blockedByLock;
-    if (blockedByLock) {
-      btn.title = "тон закрыт";
+    const stealReady =
+      enabled &&
+      hasCard &&
+      !toneLocked &&
+      tone !== null &&
+      card === tone;
+    const inactiveOrMissing = !enabled || !hasCard;
+    btn.disabled = inactiveOrMissing || blockedByLock;
+    if (!hasCard) {
+      btn.classList.add("spent");
+      forceLabel.textContent = "сброс";
     }
-    btn.addEventListener("click", () => onPlay(card));
+    if (enabled && blockedByLock) {
+      btn.classList.add("locked-match");
+      forceLabel.textContent = "замок";
+      btn.title = "тон закрыт — сыграй другое число";
+      btn.setAttribute("aria-label", `удар ${card}, замок тона`);
+      // disabled не кликается — оставляем клик только для объяснения
+      btn.disabled = false;
+      btn.setAttribute("aria-disabled", "true");
+      btn.addEventListener("click", () => {
+        lastMoveText = `Тон ${tone} закрыт: карту ${card} сыграть нельзя, пока в руке есть другое число`;
+        els.lastMove.textContent = lastMoveText;
+      });
+    } else if (stealReady) {
+      btn.classList.add("steal-ready");
+      forceLabel.textContent = "кража";
+      btn.title = "кража: сдвиг ×2, тон сгорит";
+      btn.setAttribute("aria-label", `удар ${card}, доступна кража`);
+      btn.addEventListener("click", () => onPlay(card));
+      bindPreview(btn, card);
+    } else if (enabled && hasCard) {
+      btn.addEventListener("click", () => onPlay(card));
+      bindPreview(btn, card);
+    } else {
+      btn.addEventListener("click", () => onPlay(card));
+    }
     container.appendChild(btn);
   }
 }
@@ -122,13 +490,14 @@ function render() {
   els.scoreA.textContent = String(state.scores.A);
   els.scoreB.textContent = String(state.scores.B);
   els.currentPlayer.textContent = state.finished ? "—" : stone.currentPlayer;
-  els.toneLabel.textContent = formatTone(stone.tone, stone.toneLocked);
+  updateToneBanner(stone.tone, stone.toneLocked);
+  updateDecisionHint(state);
   els.lastMove.textContent = lastMoveText;
 
   els.resonanceSelect.value = state.resonance;
   els.resonanceSelect.disabled = state.resonanceLocked || state.finished;
 
-  buildBoard(stone.position);
+  updateBoard(stone.position, { tone: stone.tone, locked: stone.toneLocked });
 
   els.handA.textContent = formatHand(stone.hands.A);
   els.handB.textContent = formatHand(stone.hands.B);
@@ -168,18 +537,27 @@ function render() {
 }
 
 function startNewSession() {
+  animToken += 1;
+  animating = false;
   const resonance = els.resonanceSelect.value;
   session = Rules.createSession({ resonance });
   sessionLog = Log.createSessionLog(session.sessionId, session.resonance);
   lastMoveText = "—";
+  lastBurst = { className: "", text: "" };
+  els.pushBurst.className = "";
+  els.pushBurst.textContent = "";
   els.notesForm.reset();
   render();
 }
 
 function onPlay(card) {
-  if (!session || session.finished) {
+  if (!session || session.finished || animating) {
     return;
   }
+  const brandBefore = {
+    tone: session.stone.tone,
+    locked: session.stone.toneLocked,
+  };
   const result = Rules.playCard(session, card);
   if (!result.ok) {
     lastMoveText = `Ошибка: ${result.error}`;
@@ -199,7 +577,14 @@ function onPlay(card) {
     session._pendingSessionSummary = result.sessionSummary;
   }
 
-  render();
+  animating = true;
+  markStrike(result.moveRecord.player, card);
+  disableAllCards();
+  els.lastMove.textContent = lastMoveText;
+  animatePush(result.moveRecord, brandBefore, () => {
+    animating = false;
+    render();
+  });
 }
 
 els.resonanceSelect.addEventListener("change", () => {
