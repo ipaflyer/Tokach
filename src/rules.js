@@ -18,8 +18,8 @@ const BALANCE = Object.freeze({
   sealDuration: 7.2,
   weakSealDuration: 2.1,
   spentDuration: 11,
-  collapseDelay: 18,
-  collapseSpeed: 7.4,
+  collapseDelay: 4,
+  collapseSpeed: 7.8,
   leakSpeed: 42,
   leakRadius: 20,
   leakTouchTime: 1.6,
@@ -506,7 +506,15 @@ function stepRun(run, input, dt) {
   run.time += sliced;
 
   if (run.time > BALANCE.collapseDelay) {
+    const wasQuiet = run.collapseX <= 0;
     run.collapseX += BALANCE.collapseSpeed * sliced;
+    if (wasQuiet) {
+      emit(run, {
+        type: "collapse-start",
+        x: run.collapseX,
+        y: run.player.y,
+      });
+    }
   }
 
   if (input.cancel) {
@@ -774,6 +782,28 @@ function runSelfChecks() {
     stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
     assert(run.status === "lost", "должен проиграть отмиранию");
     assert(run.failReason === "collapse", run.failReason);
+  });
+
+  check("отмирание давит на первый круг", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    for (let i = 0; i < 160; i += 1) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
+    }
+    assert(run.status === "running", `на 8с статус ${run.status}`);
+    assert(run.collapseX > 20, `полоса ${run.collapseX.toFixed(1)} ещё не давит`);
+    assert(
+      run.events.some((item) => item.type === "collapse-start"),
+      "должно быть предупреждение"
+    );
+    while (run.status === "running" && run.time < 40) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
+    }
+    assert(run.status === "lost", "стоящий у входа должен погибнуть");
+    assert(run.failReason === "collapse", run.failReason);
+    assert(run.time < 36, `смерть слишком поздняя ${run.time.toFixed(1)}с`);
   });
 
   check("тень не рвёт открытую черту", () => {

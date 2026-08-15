@@ -99,6 +99,7 @@ function react(event) {
     snap: event.reason === "cancel" ? "черта брошена" : "черта лопнула",
     "leak-warn": "обводи — не стой в сгустке",
     "ghost-enter": "тень вышла на твой старый путь",
+    "collapse-start": "слева ползёт отмирание — не тяни",
     won: "ты вышел с грузом",
     lost:
       event.reason === "collapse"
@@ -134,6 +135,9 @@ function react(event) {
   } else if (event.type === "ghost-enter") {
     burst(event.x, event.y, "#fb7185", 16);
     blip(140, 0.18, "sine");
+  } else if (event.type === "collapse-start") {
+    burst(event.x + 20, event.y, "#fb7185", 10);
+    blip(90, 0.2, "sine");
   } else if (event.type === "won") {
     blip(523, 0.3, "triangle");
   } else if (event.type === "lost") {
@@ -296,8 +300,8 @@ function drawWorld(state) {
   grad.addColorStop(1, "rgba(255, 45, 85, 0.08)");
   ctx.fillStyle = grad;
   ctx.fillRect(collapse.x, collapse.y, state.collapseX, state.world.h);
-  ctx.strokeStyle = "rgba(255, 80, 120, 0.85)";
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(255, 80, 120, 0.95)";
+  ctx.lineWidth = 5;
   ctx.beginPath();
   const edge = worldToScreen(state.collapseX, 0);
   ctx.moveTo(edge.x, edge.y);
@@ -603,6 +607,8 @@ function tick(now) {
     hud.hint.textContent = state.closeHint.near
       ? "ты в кольце — замкнётся"
       : "жёлтое кольцо — зайди в него, чтобы замкнуть";
+  } else if (state.collapseX > 8) {
+    hud.hint.textContent = "слева отмирает — замкни и уходи";
   }
 
   drawWorld(state);
