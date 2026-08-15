@@ -1,0 +1,12 @@
+# Local agent loop flags
+.cursor/LOOP_ON
+.cursor/LOOP_DONE
+
+# Runtime / OS
+logs/
+.DS_Store
+*.log
+
+# Editor
+.idea/
+.vscode/

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Толкач — прототип</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 16px;
+      max-width: 720px;
+      line-height: 1.4;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 8px; }
+    .row { margin: 8px 0; }
+    .board {
+      display: flex;
+      gap: 2px;
+      margin: 12px 0;
+      flex-wrap: nowrap;
+    }
+    .cell {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #333;
+      text-align: center;
+      line-height: 40px;
+      font-size: 12px;
+    }
+    .cell.stone { background: #ccc; font-weight: bold; }
+    .cell.edge { background: #eee; }
+    button {
+      font-size: 1.1rem;
+      min-width: 44px;
+      min-height: 44px;
+      margin: 2px;
+    }
+    button:disabled { opacity: 0.4; }
+    .hands {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .panel {
+      border: 1px solid #999;
+      padding: 8px;
+    }
+    .panel.active { border-width: 2px; border-color: #000; }
+    #lastMove { min-height: 1.4em; color: #333; }
+    #notesForm, #sessionEnd { display: none; }
+    label { display: block; margin: 6px 0; }
+    textarea { width: 100%; min-height: 48px; }
+    .muted { color: #555; font-size: 0.9rem; }
+    #selfCheckOut { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Толкач — прототип v0.1</h1>
+  <p class="muted">Двое на одном устройстве. Старт со смещением 1 к первому. Opening задаёт закрытый тон. Кража по умолчанию ×2.</p>
+
+  <div class="row" id="controlsTop">
+    <label>
+      Резонанс кражи (до первого хода):
+      <select id="resonanceSelect">
+        <option value="double" selected>×2 (по умолчанию)</option>
+        <option value="plus1">карта + 1</option>
+        <option value="plus2">карта + 2</option>
+      </select>
+    </label>
+    <button type="button" id="newSessionBtn">Новая сессия</button>
+  </div>
+
+  <div class="row" id="statusRow">
+    <div>Камень <strong id="stoneNum">1</strong> / 5 · Счёт A <strong id="scoreA">0</strong> : <strong id="scoreB">0</strong> B</div>
+    <div>Ход: игрок <strong id="currentPlayer">A</strong> (A ← минус, B → плюс)</div>
+    <div>Тон: <strong id="toneLabel">молчит</strong></div>
+  </div>
+
+  <div class="board" id="board" aria-label="Поле"></div>
+
+  <div class="row" id="lastMove">—</div>
+
+  <div class="hands">
+    <div class="panel" id="panelA">
+      <div><strong>Игрок A</strong> (в ←)</div>
+      <div>Рука: <span id="handA"></span></div>
+      <div>Сброс: <span id="discardA">—</span></div>
+      <div id="buttonsA"></div>
+    </div>
+    <div class="panel" id="panelB">
+      <div><strong>Игрок B</strong> (в →)</div>
+      <div>Рука: <span id="handB"></span></div>
+      <div>Сброс: <span id="discardB">—</span></div>
+      <div id="buttonsB"></div>
+    </div>
+  </div>
+
+  <div id="sessionEnd" class="row">
+    <p><strong>Сессия окончена.</strong> Победитель: <span id="winnerLabel"></span>. Счёт <span id="finalScore"></span>.</p>
+  </div>
+
+  <form id="notesForm" class="row">
+    <p><strong>Заметки плейтеста</strong> (для лога)</p>
+    <label>
+      Назвали сами шаблон «в погоне кради, впереди трави»?
+      <select name="namedHeuristicThemselves" required>
+        <option value="">—</option>
+        <option value="yes">да</option>
+        <option value="no">нет</option>
+      </select>
+    </label>
+    <label>
+      Просили обрыв / пятёрку / скрытые карты / «ещё систем»?
+      <select name="askedForMoreSystems" required>
+        <option value="">—</option>
+        <option value="yes">да</option>
+        <option value="no">нет</option>
+      </select>
+    </label>
+    <label>
+      Если да — что именно:
+      <input type="text" name="askedForMoreSystemsDetail" />
+    </label>
+    <label>
+      Спорили о конкретном ходе?
+      <select name="disputedSpecificMove" required>
+        <option value="">—</option>
+        <option value="yes">да</option>
+        <option value="no">нет</option>
+      </select>
+    </label>
+    <label>
+      Цитата / камень.ход (например 3.7):
+      <input type="text" name="disputeStoneMove" />
+    </label>
+    <label>
+      Цитата спора:
+      <textarea name="disputeQuote"></textarea>
+    </label>
+    <label>
+      Ощущение:
+      <select name="feeling" required>
+        <option value="">—</option>
+        <option value="pushed">«я его толкнул»</option>
+        <option value="counted">«мы считали карты»</option>
+        <option value="mixed">смешанно</option>
+      </select>
+    </label>
+    <label>
+      Хотели сразу ещё сессию?
+      <select name="wantedAnotherSession" required>
+        <option value="">—</option>
+        <option value="yes">да</option>
+        <option value="no">нет</option>
+      </select>
+    </label>
+    <button type="submit">Сохранить лог (скачать JSON)</button>
+  </form>
+
+  <hr />
+  <div class="row muted">
+    <button type="button" id="selfCheckBtn">Самопроверки правил</button>
+    <div id="selfCheckOut"></div>
+  </div>
+
+  <script src="src/rules.js"></script>
+  <script src="src/log.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>
