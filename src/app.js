@@ -354,7 +354,7 @@ function drawWorld(state) {
     const hint = state.closeHint;
     const hp = worldToScreen(hint.x, hint.y);
     const pl2 = worldToScreen(state.player.x, state.player.y);
-    const pulse = 10 + Math.sin(t * 7) * 4 + (hint.near ? 6 : 0);
+    const zone = state.balance.closeRadius || 34;
     ctx.setLineDash([10, 8]);
     ctx.strokeStyle = hint.near ? "rgba(253, 224, 71, 0.95)" : "rgba(253, 224, 71, 0.45)";
     ctx.lineWidth = hint.near ? 3 : 2;
@@ -363,14 +363,13 @@ function drawWorld(state) {
     ctx.lineTo(hp.x, hp.y);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.shadowBlur = 22;
-    ctx.shadowColor = "#fde047";
+    ctx.fillStyle = hint.near ? "rgba(250, 204, 21, 0.45)" : "rgba(250, 204, 21, 0.22)";
+    ctx.beginPath();
+    ctx.arc(hp.x, hp.y, zone, 0, Math.PI * 2);
+    ctx.fill();
     ctx.strokeStyle = "#facc15";
     ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(hp.x, hp.y, pulse, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.shadowBlur = 0;
     ctx.fillStyle = "#fef9c3";
     ctx.beginPath();
     ctx.arc(hp.x, hp.y, 5, 0, Math.PI * 2);
@@ -378,7 +377,7 @@ function drawWorld(state) {
     ctx.font = "700 15px 'Trebuchet MS', sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = "#fef08a";
-    ctx.fillText("замкни", hp.x, hp.y - pulse - 8);
+    ctx.fillText("замкни", hp.x, hp.y - zone - 8);
   }
 
   for (let i = 0; i < state.leaks.length; i += 1) {
@@ -598,8 +597,8 @@ function tick(now) {
   hud.cargo.classList.toggle("held", state.cargo.held);
   if (state.closeHint) {
     hud.hint.textContent = state.closeHint.near
-      ? "ещё чуть — замкнёшь контур"
-      : "жёлтая точка — вернись туда и замкни";
+      ? "ты в кольце — замкнётся"
+      : "жёлтое кольцо — зайди в него, чтобы замкнуть";
   }
 
   drawWorld(state);

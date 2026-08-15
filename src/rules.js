@@ -12,7 +12,7 @@ const BALANCE = Object.freeze({
   maxTrailLen: 920,
   minLoopArea: 4800,
   minLoopPath: 240,
-  closeRadius: 20,
+  closeRadius: 34,
   wallAssistDist: 30,
   wallAssistThreshold: 0.5,
   sealDuration: 7.2,
@@ -598,7 +598,7 @@ function closeHintFor(run) {
     x: start.x,
     y: start.y,
     dist: distance,
-    near: distance <= BALANCE.closeRadius * 4,
+    near: distance <= BALANCE.closeRadius,
   };
 }
 
@@ -805,6 +805,23 @@ function runSelfChecks() {
     const hint = getPublicState(run).closeHint;
     assert(hint !== null, "на длинной черте должна быть точка замыкания");
     assert(Math.abs(hint.x - run.trail[0].x) < 1, "точка — начало черты");
+  });
+
+  check("вход в кольцо замыкания закрывает контур", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    run.player.x = 160;
+    run.player.y = 320;
+    run.trail = [];
+    run.trailLen = 0;
+    walkTo(run, { x: 320, y: 320 }, 400);
+    walkTo(run, { x: 320, y: 480 }, 400);
+    walkTo(run, { x: 160, y: 480 }, 400);
+    assert(run.stats.closes === 0, "три стороны ещё не контур");
+    walkTo(run, { x: 160, y: 332 }, 200);
+    assert(run.stats.closes >= 1, "в кольце 34 px контур должен закрыться");
   });
 
   check("касание сгустка не убивает сразу", () => {
