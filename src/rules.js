@@ -388,6 +388,18 @@ function closeLoop(run, startIndex, forced) {
   return true;
 }
 
+function tryCloseFromIndex(run, idx, forcedByGhost) {
+  if (idx < 0 || idx >= run.trail.length) {
+    return false;
+  }
+  const tail = run.trail.slice(idx);
+  tail.push({ x: run.player.x, y: run.player.y });
+  if (Geom.polylineLength(tail) < BALANCE.minLoopPath) {
+    return false;
+  }
+  return closeLoop(run, idx, forcedByGhost);
+}
+
 function tryClose(run, forcedByGhost) {
   const idx = Geom.findClosingIndex(
     run.trail,
@@ -395,22 +407,19 @@ function tryClose(run, forcedByGhost) {
     BALANCE.closeRadius,
     BALANCE.minLoopPath
   );
-  if (idx < 0) {
-    return false;
-  }
-  return closeLoop(run, idx, forcedByGhost);
+  return tryCloseFromIndex(run, idx, forcedByGhost);
 }
 
-function ghostTouchesTrail(run) {
+function ghostTrailIndex(run) {
   if (!run.ghost || !run.ghost.alive || run.trail.length < 6) {
-    return false;
+    return -1;
   }
   for (let i = 0; i < run.trail.length - 4; i += 3) {
     if (Geom.dist(run.ghost, run.trail[i]) <= BALANCE.closeRadius) {
-      return true;
+      return i;
     }
   }
-  return false;
+  return -1;
 }
 
 function stepGhost(run, dt) {
@@ -534,11 +543,9 @@ function stepRun(run, input, dt) {
   }
 
   stepGhost(run, sliced);
-  if (ghostTouchesTrail(run)) {
-    const closed = tryClose(run, true);
-    if (!closed) {
-      snapTrail(run, "ghost");
-    }
+  const ghostIdx = ghostTrailIndex(run);
+  if (ghostIdx >= 0) {
+    tryCloseFromIndex(run, ghostIdx, true);
   }
 
   let touchingLeak = false;
@@ -727,6 +734,41 @@ function runSelfChecks() {
     stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
     assert(run.status === "lost", "должен проиграть отмиранию");
     assert(run.failReason === "collapse", run.failReason);
+  });
+
+  check("тень не рвёт открытую черту", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    run.player.x = 188;
+    run.player.y = 448;
+    run.trail = [];
+    run.trailLen = 0;
+    walkTo(run, { x: 188, y: 300 }, 400);
+    walkTo(run, { x: 330, y: 300 }, 400);
+    const trailBefore = run.trail.length;
+    assert(trailBefore > 6, `черта слишком короткая ${trailBefore}`);
+    const snapsBefore = run.stats.snaps;
+    const path = [];
+    for (let x = 120; x <= 360; x += 8) {
+      path.push({ x, y: 300 });
+    }
+    run.ghostPoints = path;
+    run.ghostIndex = 0;
+    run.ghost = { x: path[0].x, y: path[0].y, alive: true };
+    for (let i = 0; i < 90; i += 1) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.04);
+    }
+    assert(run.status === "running", `статус ${run.status}`);
+    assert(
+      run.stats.snaps === snapsBefore,
+      `тень сорвала черту (${run.stats.snaps - snapsBefore})`
+    );
+    assert(
+      run.trail.length >= 4 || run.stats.closes > 0,
+      "черта остаётся или тень закрыла форму, но не срыв"
+    );
   });
 
   return results;

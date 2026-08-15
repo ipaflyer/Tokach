@@ -91,7 +91,7 @@ function react(event) {
     return;
   }
   const labels = {
-    seal: event.weak ? "слабо: печать" : "печать",
+    seal: event.forced ? "тень замкнула" : event.weak ? "слабо: печать" : "печать",
     burn: event.ghost ? "выжигание тени" : "выжигание",
     capture: "захват",
     "weak-burn": "слабо — слишком много стен",
