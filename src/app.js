@@ -141,7 +141,7 @@ function clampCell(position) {
 }
 
 function buildBoardSkeleton() {
-  if (els.board.dataset.ready === "1") {
+  if (els.board.dataset.ready === "tone-1") {
     return;
   }
   els.board.innerHTML = "";
@@ -163,26 +163,59 @@ function buildBoardSkeleton() {
     const token = document.createElement("span");
     token.className = "token";
     token.hidden = true;
+    const brand = document.createElement("span");
+    brand.className = "brand";
+    brand.hidden = true;
+    token.appendChild(brand);
     div.appendChild(label);
     div.appendChild(token);
     els.board.appendChild(div);
   }
-  els.board.dataset.ready = "1";
+  els.board.dataset.ready = "tone-1";
 }
 
 function clearBoardMarks(kinds) {
   for (const el of els.board.children) {
     el.classList.remove(...kinds);
     if (kinds.includes("stone")) {
+      el.classList.remove("brand-silent", "brand-locked", "brand-open", "brand-burn");
       const token = el.querySelector(".token");
       if (token) {
         token.hidden = true;
+      }
+      const brand = el.querySelector(".brand");
+      if (brand) {
+        brand.hidden = true;
+        brand.textContent = "";
       }
     }
   }
 }
 
-function placeStone(position, extras) {
+function paintBrand(el, brand, burned) {
+  const mark = el.querySelector(".brand");
+  el.classList.remove("brand-silent", "brand-locked", "brand-open", "brand-burn");
+  if (!mark) {
+    return;
+  }
+  if (burned && brand && brand.tone !== null) {
+    mark.hidden = false;
+    mark.textContent = String(brand.tone);
+    el.classList.add("brand-burn");
+    return;
+  }
+  if (!brand || brand.tone === null) {
+    mark.hidden = true;
+    mark.textContent = "";
+    el.classList.add("brand-silent");
+    return;
+  }
+  mark.hidden = false;
+  mark.textContent = String(brand.tone);
+  el.classList.add(brand.locked ? "brand-locked" : "brand-open");
+}
+
+function placeStone(position, extras, brand, burned) {
   const el = cellEl(clampCell(position));
   if (!el) {
     return;
@@ -192,6 +225,17 @@ function placeStone(position, extras) {
   if (token) {
     token.hidden = false;
   }
+  paintBrand(el, brand, burned);
+}
+
+function brandAfterFrom(record) {
+  if (record.toneAfter === null) {
+    return { tone: null, locked: false };
+  }
+  return {
+    tone: record.toneAfter,
+    locked: record.moveType === "opening",
+  };
 }
 
 function pathCells(from, to) {
@@ -287,11 +331,12 @@ function bindPreview(btn, card) {
   });
 }
 
-function animatePush(record, done) {
+function animatePush(record, brandBefore, done) {
   const token = (animToken += 1);
+  const brandAfter = brandAfterFrom(record);
   buildBoardSkeleton();
   clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
-  placeStone(record.positionBefore);
+  placeStone(record.positionBefore, [], brandBefore);
   showPushBurst(record);
   const path = pathCells(record.positionBefore, record.positionAfter);
   const steal = record.moveType === "steal";
@@ -312,6 +357,25 @@ function animatePush(record, done) {
     done();
   }
 
+  function landAt(position, extras) {
+    if (steal) {
+      placeStone(position, extras, brandBefore, true);
+      window.setTimeout(() => {
+        if (token !== animToken) {
+          return;
+        }
+        const el = cellEl(clampCell(position));
+        if (el) {
+          paintBrand(el, brandAfter);
+        }
+        window.setTimeout(finish, 220);
+      }, 200);
+      return;
+    }
+    placeStone(position, extras, brandAfter);
+    window.setTimeout(finish, 380);
+  }
+
   function step() {
     if (token !== animToken) {
       return;
@@ -319,16 +383,15 @@ function animatePush(record, done) {
     if (index >= path.length) {
       clearBoardMarks(["stone", "impact", "fallen"]);
       if (offBoard) {
-        placeStone(record.positionAfter < 0 ? CELL_MIN : CELL_MAX, ["impact", "fallen"]);
+        landAt(record.positionAfter < 0 ? CELL_MIN : CELL_MAX, ["impact", "fallen"]);
       } else {
-        placeStone(record.positionAfter, ["impact"]);
+        landAt(record.positionAfter, ["impact"]);
       }
-      window.setTimeout(finish, 380);
       return;
     }
     clearBoardMarks(["stone", "impact", "fallen"]);
     const extras = index === path.length - 1 && !offBoard ? ["impact"] : [];
-    placeStone(path[index], extras);
+    placeStone(path[index], extras, brandBefore);
     index += 1;
     window.setTimeout(step, interval);
   }
@@ -336,10 +399,10 @@ function animatePush(record, done) {
   window.setTimeout(step, 100);
 }
 
-function updateBoard(position) {
+function updateBoard(position, brand) {
   buildBoardSkeleton();
   clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
-  placeStone(position);
+  placeStone(position, [], brand);
 }
 
 function disableAllCards() {
@@ -434,7 +497,7 @@ function render() {
   els.resonanceSelect.value = state.resonance;
   els.resonanceSelect.disabled = state.resonanceLocked || state.finished;
 
-  updateBoard(stone.position);
+  updateBoard(stone.position, { tone: stone.tone, locked: stone.toneLocked });
 
   els.handA.textContent = formatHand(stone.hands.A);
   els.handB.textContent = formatHand(stone.hands.B);
@@ -491,6 +554,10 @@ function onPlay(card) {
   if (!session || session.finished || animating) {
     return;
   }
+  const brandBefore = {
+    tone: session.stone.tone,
+    locked: session.stone.toneLocked,
+  };
   const result = Rules.playCard(session, card);
   if (!result.ok) {
     lastMoveText = `Ошибка: ${result.error}`;
@@ -514,7 +581,7 @@ function onPlay(card) {
   markStrike(result.moveRecord.player, card);
   disableAllCards();
   els.lastMove.textContent = lastMoveText;
-  animatePush(result.moveRecord, () => {
+  animatePush(result.moveRecord, brandBefore, () => {
     animating = false;
     render();
   });
