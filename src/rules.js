@@ -3,7 +3,7 @@
  * Спека: PROTOTYPE_SPEC.md, концепция: GAME_DESIGN.md
  */
 
-const G = window.ObvodGeometry;
+const Geom = window.ObvodGeometry;
 
 const BALANCE = Object.freeze({
   playerRadius: 13,
@@ -18,8 +18,8 @@ const BALANCE = Object.freeze({
   sealDuration: 7.2,
   weakSealDuration: 2.1,
   spentDuration: 11,
-  collapseDelay: 13,
-  collapseSpeed: 8.6,
+  collapseDelay: 18,
+  collapseSpeed: 7.4,
   leakSpeed: 42,
   leakRadius: 20,
   leakTouchTime: 0.55,
@@ -170,7 +170,7 @@ function emit(run, event) {
 function blockedAt(run, x, y, radius, ignoreSeals) {
   const walls = run.district.walls;
   for (let i = 0; i < walls.length; i += 1) {
-    if (G.circleHitsAabb(x, y, radius, walls[i])) {
+    if (Geom.circleHitsAabb(x, y, radius, walls[i])) {
       return true;
     }
   }
@@ -184,7 +184,7 @@ function blockedAt(run, x, y, radius, ignoreSeals) {
       if (seal.grace > 0) {
         continue;
       }
-      if (G.pointInPolygon(p, seal.poly) && !G.pointInPolygon(run.player, seal.poly)) {
+      if (Geom.pointInPolygon(p, seal.poly) && !Geom.pointInPolygon(run.player, seal.poly)) {
         return true;
       }
     }
@@ -201,13 +201,13 @@ function moveBody(run, body, dx, dy, radius) {
   if (!blockedAt(run, body.x, nextY, radius, false)) {
     body.y = nextY;
   }
-  body.x = G.clamp(body.x, 50, WORLD.w - 50);
-  body.y = G.clamp(body.y, 50, WORLD.h - 50);
+  body.x = Geom.clamp(body.x, 50, WORLD.w - 50);
+  body.y = Geom.clamp(body.y, 50, WORLD.h - 50);
 }
 
 function inSpent(run, p) {
   for (let i = 0; i < run.spent.length; i += 1) {
-    if (G.pointInPolygon(p, run.spent[i].poly)) {
+    if (Geom.pointInPolygon(p, run.spent[i].poly)) {
       return true;
     }
   }
@@ -215,7 +215,7 @@ function inSpent(run, p) {
 }
 
 function spentOverlap(run, poly) {
-  return G.samplePolygonOverlap(poly, (p) => inSpent(run, p), 8);
+  return Geom.samplePolygonOverlap(poly, (p) => inSpent(run, p), 8);
 }
 
 function addSpent(run, poly, extraTtl) {
@@ -229,7 +229,7 @@ function addSpent(run, poly, extraTtl) {
 }
 
 function spentAlongTrail(run, points) {
-  const dense = G.densifyPolyline(points, 14);
+  const dense = Geom.densifyPolyline(points, 14);
   for (let i = 0; i < dense.length; i += 8) {
     const cluster = [];
     const c = dense[i];
@@ -265,18 +265,18 @@ function cancelTrail(run) {
 function classifyInterior(run, poly) {
   const cargoInside =
     !run.cargo.held &&
-    G.pointInPolygon({ x: run.cargo.x, y: run.cargo.y }, poly);
+    Geom.pointInPolygon({ x: run.cargo.x, y: run.cargo.y }, poly);
   const leaksInside = [];
   for (let i = 0; i < run.leaks.length; i += 1) {
     const leak = run.leaks[i];
-    if (leak.alive && G.pointInPolygon(leak, poly)) {
+    if (leak.alive && Geom.pointInPolygon(leak, poly)) {
       leaksInside.push(leak);
     }
   }
   const ghostInside =
     run.ghost &&
     run.ghost.alive &&
-    G.pointInPolygon(run.ghost, poly);
+    Geom.pointInPolygon(run.ghost, poly);
   return { cargoInside, leaksInside, ghostInside };
 }
 
@@ -286,7 +286,7 @@ function closeLoop(run, startIndex, forced) {
   if (loop.length < 5) {
     return false;
   }
-  const area = G.polygonArea(loop);
+  const area = Geom.polygonArea(loop);
   if (area < BALANCE.minLoopArea) {
     return false;
   }
@@ -300,7 +300,7 @@ function closeLoop(run, startIndex, forced) {
     });
     return false;
   }
-  const assist = G.wallAssistRatio(
+  const assist = Geom.wallAssistRatio(
     loop,
     run.district.walls,
     BALANCE.wallAssistDist
@@ -389,7 +389,7 @@ function closeLoop(run, startIndex, forced) {
 }
 
 function tryClose(run, forcedByGhost) {
-  const idx = G.findClosingIndex(
+  const idx = Geom.findClosingIndex(
     run.trail,
     run.player,
     BALANCE.closeRadius,
@@ -406,7 +406,7 @@ function ghostTouchesTrail(run) {
     return false;
   }
   for (let i = 0; i < run.trail.length - 4; i += 3) {
-    if (G.dist(run.ghost, run.trail[i]) <= BALANCE.closeRadius) {
+    if (Geom.dist(run.ghost, run.trail[i]) <= BALANCE.closeRadius) {
       return true;
     }
   }
@@ -423,7 +423,7 @@ function stepGhost(run, dt) {
   while (remaining > 0 && idx < pts.length - 1) {
     const a = pts[idx];
     const b = pts[idx + 1];
-    const seg = Math.max(0.01, G.dist(a, b));
+    const seg = Math.max(0.01, Geom.dist(a, b));
     if (remaining >= seg) {
       remaining -= seg;
       idx += 1;
@@ -503,10 +503,10 @@ function stepRun(run, input, dt) {
   }
 
   const last = run.trail[run.trail.length - 1];
-  if (!last || G.dist(last, run.player) >= BALANCE.trailSample) {
+  if (!last || Geom.dist(last, run.player) >= BALANCE.trailSample) {
     run.trail.push({ x: run.player.x, y: run.player.y });
     if (run.trail.length > 1) {
-      run.trailLen += G.dist(run.trail[run.trail.length - 2], run.player);
+      run.trailLen += Geom.dist(run.trail[run.trail.length - 2], run.player);
     }
   }
   if (run.trailLen > BALANCE.maxTrailLen) {
@@ -547,7 +547,7 @@ function stepRun(run, input, dt) {
     if (!leak.alive) {
       continue;
     }
-    if (G.dist(run.player, leak) < BALANCE.playerRadius + BALANCE.leakRadius) {
+    if (Geom.dist(run.player, leak) < BALANCE.playerRadius + BALANCE.leakRadius) {
       touchingLeak = true;
     }
   }
@@ -566,7 +566,7 @@ function stepRun(run, input, dt) {
     return run.lastEvent;
   }
 
-  if (run.cargo.held && G.pointInAabb(run.player, run.district.exit)) {
+  if (run.cargo.held && Geom.pointInAabb(run.player, run.district.exit)) {
     finish(run, "won", null);
   }
 
@@ -617,7 +617,7 @@ function runSelfChecks() {
 
   function walkTo(run, target, guard) {
     let n = 0;
-    while (n < guard && G.dist(run.player, target) > 10) {
+    while (n < guard && Geom.dist(run.player, target) > 10) {
       n += 1;
       stepRun(
         run,

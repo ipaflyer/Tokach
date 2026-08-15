@@ -136,6 +136,9 @@ function react(event) {
 }
 
 function showOverlay(title, text, btn) {
+  if (!hud.overlayTitle || !hud.overlayText || !hud.overlayBtn) {
+    return;
+  }
   hud.overlay.classList.add("show");
   hud.overlayTitle.textContent = title;
   hud.overlayText.textContent = text;
