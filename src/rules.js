@@ -19,7 +19,9 @@ const BALANCE = Object.freeze({
   weakSealDuration: 2.1,
   spentDuration: 11,
   collapseDelay: 4,
-  collapseSpeed: 7.8,
+  collapseSpeed: 8.2,
+  collapseFastUntil: 64,
+  collapseCrawlSpeed: 1.55,
   leakSpeed: 42,
   leakRadius: 20,
   leakTouchTime: 1.6,
@@ -507,7 +509,10 @@ function stepRun(run, input, dt) {
 
   if (run.time > BALANCE.collapseDelay) {
     const wasQuiet = run.collapseX <= 0;
-    run.collapseX += BALANCE.collapseSpeed * sliced;
+    run.collapseX +=
+      (run.collapseX < BALANCE.collapseFastUntil
+        ? BALANCE.collapseSpeed
+        : BALANCE.collapseCrawlSpeed) * sliced;
     if (wasQuiet) {
       emit(run, {
         type: "collapse-start",
@@ -601,13 +606,14 @@ function stepRun(run, input, dt) {
     run.leakTouch = Math.max(0, run.leakTouch - sliced * 1.6);
   }
 
-  if (run.player.x < run.collapseX + BALANCE.playerRadius) {
-    finish(run, "lost", "collapse");
+  if (run.cargo.held && Geom.pointInAabb(run.player, run.district.exit)) {
+    finish(run, "won", null);
     return run.lastEvent;
   }
 
-  if (run.cargo.held && Geom.pointInAabb(run.player, run.district.exit)) {
-    finish(run, "won", null);
+  if (run.player.x < run.collapseX + BALANCE.playerRadius) {
+    finish(run, "lost", "collapse");
+    return run.lastEvent;
   }
 
   return run.lastEvent;
@@ -798,12 +804,26 @@ function runSelfChecks() {
       run.events.some((item) => item.type === "collapse-start"),
       "должно быть предупреждение"
     );
-    while (run.status === "running" && run.time < 40) {
+    while (run.status === "running" && run.time < 130) {
       stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
     }
     assert(run.status === "lost", "стоящий у входа должен погибнуть");
     assert(run.failReason === "collapse", run.failReason);
-    assert(run.time < 36, `смерть слишком поздняя ${run.time.toFixed(1)}с`);
+    assert(run.time > 50, `вход умер слишком рано ${run.time.toFixed(1)}с — не успеть за грузом`);
+    assert(run.time < 110, `ферма входа слишком долгая ${run.time.toFixed(1)}с`);
+  });
+
+  check("выход с грузом бьёт отмирание", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    run.cargo.held = true;
+    run.collapseX = 400;
+    run.player.x = 180;
+    run.player.y = 430;
+    stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
+    assert(run.status === "won", `ожидался выход, статус ${run.status}`);
   });
 
   check("тень не рвёт открытую черту", () => {
