@@ -231,8 +231,9 @@ function addSpent(run, poly, extraTtl) {
   }
 }
 
-function spentAlongTrail(run, points) {
+function spentAlongTrail(run, points, extraTtl) {
   const dense = Geom.densifyPolyline(points, 14);
+  const extra = extraTtl === undefined ? -4 : extraTtl;
   for (let i = 0; i < dense.length; i += 8) {
     const cluster = [];
     const c = dense[i];
@@ -241,14 +242,16 @@ function spentAlongTrail(run, points) {
     cluster.push({ x: c.x, y: c.y - r });
     cluster.push({ x: c.x + r, y: c.y });
     cluster.push({ x: c.x, y: c.y + r });
-    addSpent(run, cluster, -4);
+    addSpent(run, cluster, extra);
   }
 }
 
 function snapTrail(run, reason) {
   if (run.trail.length > 2) {
-    spentAlongTrail(run, run.trail);
-    run.stats.snaps += 1;
+    spentAlongTrail(run, run.trail, reason === "cancel" ? -8 : -3);
+    if (reason !== "cancel") {
+      run.stats.snaps += 1;
+    }
     emit(run, { type: "snap", reason, x: run.player.x, y: run.player.y });
   }
   run.trail = [];
@@ -541,7 +544,7 @@ function stepRun(run, input, dt) {
   }
 
   const last = run.trail[run.trail.length - 1];
-  if (!last || Geom.dist(last, run.player) >= BALANCE.trailSample) {
+  if (!input.cancel && (!last || Geom.dist(last, run.player) >= BALANCE.trailSample)) {
     run.trail.push({ x: run.player.x, y: run.player.y });
     if (run.trail.length > 1) {
       run.trailLen += Geom.dist(run.trail[run.trail.length - 2], run.player);
@@ -633,6 +636,21 @@ function closeHintFor(run) {
   };
 }
 
+function throwHintFor(run) {
+  if (run.trail.length < 8 || run.trailLen < BALANCE.minLoopPath) {
+    return null;
+  }
+  const close = closeHintFor(run);
+  if (close && close.near) {
+    return null;
+  }
+  const ratio = run.trailLen / BALANCE.maxTrailLen;
+  return {
+    ratio,
+    urgent: ratio >= 0.72,
+  };
+}
+
 function getPublicState(run) {
   return {
     status: run.status,
@@ -655,6 +673,7 @@ function getPublicState(run) {
     balance: BALANCE,
     hasGhost: Boolean(run.ghost && run.ghost.alive),
     closeHint: closeHintFor(run),
+    throwHint: throwHintFor(run),
   };
 }
 
@@ -960,6 +979,25 @@ function runSelfChecks() {
     }
     assert(run.status === "lost", "долгое стояние в сгустке должно убивать");
     assert(run.failReason === "leak", run.failReason);
+  });
+
+  check("длинную черту можно бросить", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    walkTo(run, { x: 200, y: 200 }, 500);
+    walkTo(run, { x: 360, y: 200 }, 400);
+    walkTo(run, { x: 360, y: 540 }, 500);
+    const hint = getPublicState(run).throwHint;
+    assert(hint, "должна быть подсказка бросить");
+    assert(hint.urgent, "черта близка к срыву");
+    const spentBefore = run.spent.length;
+    stepRun(run, { ax: 0, ay: 0, cancel: true }, 0.02);
+    assert(run.stats.cancels >= 1, "бросок не засчитан");
+    assert(run.trail.length === 0, "черта должна исчезнуть");
+    assert(run.spent.length > spentBefore, "бросок оставляет пятно");
+    assert(run.stats.snaps === 0, "бросок — не срыв по длине");
   });
 
   return results;

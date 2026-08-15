@@ -341,7 +341,7 @@ function drawWorld(state) {
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.shadowBlur = 22;
-    ctx.shadowColor = "#5eead4";
+    ctx.shadowColor = state.throwHint && state.throwHint.urgent ? "#fb923c" : "#5eead4";
     ctx.beginPath();
     const s0 = worldToScreen(trail[0].x, trail[0].y);
     ctx.moveTo(s0.x, s0.y);
@@ -349,10 +349,13 @@ function drawWorld(state) {
       const p = worldToScreen(trail[i].x, trail[i].y);
       ctx.lineTo(p.x, p.y);
     }
-    ctx.strokeStyle = "rgba(94, 234, 212, 0.35)";
+    ctx.strokeStyle =
+      state.throwHint && state.throwHint.urgent
+        ? "rgba(251, 146, 60, 0.4)"
+        : "rgba(94, 234, 212, 0.35)";
     ctx.lineWidth = 14;
     ctx.stroke();
-    ctx.strokeStyle = "#ecfeff";
+    ctx.strokeStyle = state.throwHint && state.throwHint.urgent ? "#fdba74" : "#ecfeff";
     ctx.lineWidth = 4;
     ctx.stroke();
     ctx.shadowBlur = 0;
@@ -449,6 +452,16 @@ function drawWorld(state) {
   ctx.strokeStyle = "#22d3ee";
   ctx.lineWidth = 3;
   ctx.stroke();
+  if (state.throwHint) {
+    ctx.font = "700 14px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = state.throwHint.urgent ? "#fdba74" : "rgba(254, 215, 170, 0.85)";
+    ctx.fillText(
+      state.throwHint.urgent ? "пробел — брось" : "пробел бросить",
+      pl.x,
+      pl.y + 28
+    );
+  }
 
   const exit = state.district.exit;
   const ep = worldToScreen(exit.x, exit.y);
@@ -603,10 +616,14 @@ function tick(now) {
   hud.trailFill.style.width = `${Math.round((state.trailLen / state.maxTrailLen) * 100)}%`;
   hud.cargo.textContent = state.cargo.held ? "груз у тебя — к выходу" : "груз в кладовой";
   hud.cargo.classList.toggle("held", state.cargo.held);
-  if (state.closeHint) {
-    hud.hint.textContent = state.closeHint.near
-      ? "ты в кольце — замкнётся"
-      : "жёлтое кольцо — зайди в него, чтобы замкнуть";
+  if (state.closeHint && state.closeHint.near) {
+    hud.hint.textContent = "ты в кольце — замкнётся";
+  } else if (state.throwHint && state.throwHint.urgent) {
+    hud.hint.textContent = "пробел — бросить, иначе черта лопнет";
+  } else if (state.closeHint) {
+    hud.hint.textContent = "жёлтое кольцо — зайди в него, чтобы замкнуть · пробел — бросить";
+  } else if (state.throwHint) {
+    hud.hint.textContent = "пробел — бросить плохой контур";
   } else if (state.collapseX > 8) {
     hud.hint.textContent = "слева отмирает — замкни и уходи";
   }
