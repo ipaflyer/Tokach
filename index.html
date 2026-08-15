@@ -34,32 +34,72 @@
     }
     h1 { font-size: 1.35rem; margin: 0 0 8px; letter-spacing: -0.02em; }
     .row { margin: 8px 0; }
+    .track {
+      margin: 12px 0 8px;
+    }
     .board {
       display: flex;
       gap: 3px;
-      margin: 12px 0;
       flex-wrap: nowrap;
     }
     .cell {
+      position: relative;
       width: 42px;
-      height: 42px;
+      height: 52px;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       text-align: center;
-      line-height: 42px;
-      font-size: 12px;
+      font-size: 11px;
       background: #fff;
       color: var(--muted);
+      overflow: hidden;
+    }
+    .cell .cell-label {
+      position: absolute;
+      top: 3px;
+      left: 0;
+      right: 0;
+      line-height: 1;
+      font-size: 10px;
+    }
+    .cell .token {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 6px;
+      height: 26px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 32% 28%, #c5ccd6 0%, #4b5563 42%, #111827 78%);
+      box-shadow: 0 3px 6px rgba(17, 24, 39, 0.35);
     }
     .cell.stone {
-      background: var(--ink);
-      color: #fff;
-      font-weight: 700;
       box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink);
     }
     .cell.edge { background: #eef2f7; }
     .cell.neg-side { background: linear-gradient(180deg, #fff, var(--a-soft)); }
     .cell.pos-side { background: linear-gradient(180deg, #fff, var(--b-soft)); }
+    .cell.path { background: #cfe8dc; }
+    .cell.path-steal { background: var(--steal-soft); }
+    .cell.preview { box-shadow: inset 0 0 0 2px var(--tone); }
+    .cell.preview-finish { box-shadow: inset 0 0 0 2px var(--steal); background: #fff1f2; }
+    .cell.impact .token { animation: stone-impact 0.28s ease; }
+    .cell.fallen .token { opacity: 0.2; transform: scale(0.55); }
+    @keyframes stone-impact {
+      0% { transform: scale(1.28); }
+      55% { transform: scale(0.9); }
+      100% { transform: scale(1); }
+    }
+    #pushBurst {
+      min-height: 1.4em;
+      margin: 0 0 8px;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: 0.01em;
+    }
+    #pushBurst.steal { color: var(--steal); }
+    #pushBurst.opening { color: var(--warn); }
+    #pushBurst.rewrite, #pushBurst.setup { color: var(--tone); }
     button {
       font-size: 1.05rem;
       min-width: 52px;
@@ -178,7 +218,8 @@
     .muted { color: var(--muted); font-size: 0.9rem; }
     #selfCheckOut { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
     @media (max-width: 640px) {
-      .cell { width: 28px; height: 28px; line-height: 28px; font-size: 10px; }
+      .cell { width: 28px; height: 40px; font-size: 10px; }
+      .cell .token { left: 5px; right: 5px; height: 18px; bottom: 4px; }
       .hands { grid-template-columns: 1fr; }
     }
   </style>
@@ -210,7 +251,10 @@
   </div>
   <div id="decisionHint">—</div>
 
-  <div class="board" id="board" aria-label="Поле"></div>
+  <div class="track">
+    <div class="board" id="board" aria-label="Поле"></div>
+  </div>
+  <div id="pushBurst" aria-live="polite"></div>
 
   <div class="row" id="lastMove">—</div>
 

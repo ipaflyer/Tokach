@@ -8,6 +8,11 @@ const Log = window.TokachLog;
 let session = null;
 let sessionLog = null;
 let lastMoveText = "—";
+let animating = false;
+let animToken = 0;
+
+const CELL_MIN = -6;
+const CELL_MAX = 6;
 
 const els = {
   resonanceSelect: document.getElementById("resonanceSelect"),
@@ -36,6 +41,7 @@ const els = {
   finalScore: document.getElementById("finalScore"),
   selfCheckBtn: document.getElementById("selfCheckBtn"),
   selfCheckOut: document.getElementById("selfCheckOut"),
+  pushBurst: document.getElementById("pushBurst"),
 };
 
 function formatHand(cards) {
@@ -125,12 +131,24 @@ function describeMove(record) {
   return parts.join(" · ");
 }
 
-function buildBoard(position) {
+function cellEl(position) {
+  return els.board.querySelector(`[data-pos="${position}"]`);
+}
+
+function clampCell(position) {
+  return Math.max(CELL_MIN, Math.min(CELL_MAX, position));
+}
+
+function buildBoardSkeleton() {
+  if (els.board.dataset.ready === "1") {
+    return;
+  }
   els.board.innerHTML = "";
-  for (let cell = -6; cell <= 6; cell += 1) {
+  for (let cell = CELL_MIN; cell <= CELL_MAX; cell += 1) {
     const div = document.createElement("div");
     div.className = "cell";
-    if (cell === -6 || cell === 6) {
+    div.dataset.pos = String(cell);
+    if (cell === CELL_MIN || cell === CELL_MAX) {
       div.classList.add("edge");
     }
     if (cell < 0) {
@@ -138,13 +156,130 @@ function buildBoard(position) {
     } else if (cell > 0) {
       div.classList.add("pos-side");
     }
-    if (cell === position) {
-      div.classList.add("stone");
-      div.textContent = "●";
-    } else {
-      div.textContent = String(cell);
-    }
+    const label = document.createElement("span");
+    label.className = "cell-label";
+    label.textContent = String(cell);
+    const token = document.createElement("span");
+    token.className = "token";
+    token.hidden = true;
+    div.appendChild(label);
+    div.appendChild(token);
     els.board.appendChild(div);
+  }
+  els.board.dataset.ready = "1";
+}
+
+function clearBoardMarks(kinds) {
+  for (const el of els.board.children) {
+    el.classList.remove(...kinds);
+    if (kinds.includes("stone")) {
+      const token = el.querySelector(".token");
+      if (token) {
+        token.hidden = true;
+      }
+    }
+  }
+}
+
+function placeStone(position, extras) {
+  const el = cellEl(clampCell(position));
+  if (!el) {
+    return;
+  }
+  el.classList.add("stone", ...(extras || []));
+  const token = el.querySelector(".token");
+  if (token) {
+    token.hidden = false;
+  }
+}
+
+function pathCells(from, to) {
+  const cells = [];
+  if (from === to) {
+    return cells;
+  }
+  const step = to > from ? 1 : -1;
+  for (let pos = from + step; pos !== to + step; pos += step) {
+    if (pos < CELL_MIN || pos > CELL_MAX) {
+      continue;
+    }
+    cells.push(pos);
+  }
+  return cells;
+}
+
+function showPushBurst(record) {
+  const dir = record.player === "A" ? "←" : "→";
+  let kind = "setup";
+  if (record.moveType === "steal") {
+    kind = "кража";
+  } else if (record.moveType === "opening") {
+    kind = "opening";
+  } else if (record.moveType === "rewrite") {
+    kind = "перепись";
+  }
+  els.pushBurst.className = record.moveType;
+  els.pushBurst.textContent = `${dir} ${record.shift} · ${kind}`;
+}
+
+function animatePush(record, done) {
+  const token = (animToken += 1);
+  buildBoardSkeleton();
+  clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
+  placeStone(record.positionBefore);
+  showPushBurst(record);
+  const path = pathCells(record.positionBefore, record.positionAfter);
+  const steal = record.moveType === "steal";
+  for (const pos of path) {
+    const el = cellEl(pos);
+    if (el) {
+      el.classList.add(steal ? "path-steal" : "path");
+    }
+  }
+  const offBoard = record.positionAfter < CELL_MIN || record.positionAfter > CELL_MAX;
+  const interval = steal ? 120 : 170;
+  let index = 0;
+
+  function finish() {
+    if (token !== animToken) {
+      return;
+    }
+    done();
+  }
+
+  function step() {
+    if (token !== animToken) {
+      return;
+    }
+    if (index >= path.length) {
+      clearBoardMarks(["stone", "impact", "fallen"]);
+      if (offBoard) {
+        placeStone(record.positionAfter < 0 ? CELL_MIN : CELL_MAX, ["impact", "fallen"]);
+      } else {
+        placeStone(record.positionAfter, ["impact"]);
+      }
+      window.setTimeout(finish, 380);
+      return;
+    }
+    clearBoardMarks(["stone", "impact", "fallen"]);
+    const extras = index === path.length - 1 && !offBoard ? ["impact"] : [];
+    placeStone(path[index], extras);
+    index += 1;
+    window.setTimeout(step, interval);
+  }
+
+  window.setTimeout(step, 100);
+}
+
+function updateBoard(position) {
+  buildBoardSkeleton();
+  clearBoardMarks(["stone", "path", "path-steal", "impact", "fallen", "preview", "preview-finish"]);
+  placeStone(position);
+}
+
+function disableAllCards() {
+  for (const btn of [...els.buttonsA.children, ...els.buttonsB.children]) {
+    btn.disabled = true;
   }
 }
 
@@ -207,7 +342,7 @@ function render() {
   els.resonanceSelect.value = state.resonance;
   els.resonanceSelect.disabled = state.resonanceLocked || state.finished;
 
-  buildBoard(stone.position);
+  updateBoard(stone.position);
 
   els.handA.textContent = formatHand(stone.hands.A);
   els.handB.textContent = formatHand(stone.hands.B);
@@ -247,16 +382,20 @@ function render() {
 }
 
 function startNewSession() {
+  animToken += 1;
+  animating = false;
   const resonance = els.resonanceSelect.value;
   session = Rules.createSession({ resonance });
   sessionLog = Log.createSessionLog(session.sessionId, session.resonance);
   lastMoveText = "—";
+  els.pushBurst.className = "";
+  els.pushBurst.textContent = "";
   els.notesForm.reset();
   render();
 }
 
 function onPlay(card) {
-  if (!session || session.finished) {
+  if (!session || session.finished || animating) {
     return;
   }
   const result = Rules.playCard(session, card);
@@ -278,7 +417,13 @@ function onPlay(card) {
     session._pendingSessionSummary = result.sessionSummary;
   }
 
-  render();
+  animating = true;
+  disableAllCards();
+  els.lastMove.textContent = lastMoveText;
+  animatePush(result.moveRecord, () => {
+    animating = false;
+    render();
+  });
 }
 
 els.resonanceSelect.addEventListener("change", () => {
