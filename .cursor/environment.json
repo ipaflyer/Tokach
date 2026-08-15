@@ -1,0 +1,10 @@
+{
+  "name": "Obvod",
+  "install": "echo \"Обвод: static HTML, зависимостей нет\"",
+  "terminals": [
+    {
+      "name": "game-server",
+      "command": "python3 -m http.server 8765 --bind 127.0.0.1"
+    }
+  ]
+}

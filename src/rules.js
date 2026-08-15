@@ -1,362 +1,599 @@
 /**
- * Толкач — ядро правил (без DOM).
- * Спека: PROTOTYPE_SPEC.md
+ * Обвод — правила забега. Без DOM.
+ * Спека: PROTOTYPE_SPEC.md, концепция: GAME_DESIGN.md
  */
 
-const FULL_HAND = Object.freeze([1, 2, 3, 4]);
-const STONES_PER_SESSION = 5;
-const EDGE = 6;
-const RESONANCE_DOUBLE = "double";
-const RESONANCE_PLUS2 = "plus2";
-const RESONANCE_PLUS1 = "plus1";
+const G = window.ObvodGeometry;
 
-function cloneHand(hand) {
-  return hand.slice().sort((a, b) => a - b);
+const BALANCE = Object.freeze({
+  playerRadius: 13,
+  playerSpeed: 208,
+  trailSample: 9,
+  maxTrailLen: 920,
+  minLoopArea: 4800,
+  minLoopPath: 240,
+  closeRadius: 20,
+  wallAssistDist: 30,
+  wallAssistThreshold: 0.5,
+  sealDuration: 7.2,
+  weakSealDuration: 2.1,
+  spentDuration: 11,
+  collapseDelay: 13,
+  collapseSpeed: 8.6,
+  leakSpeed: 42,
+  leakRadius: 20,
+  leakTouchTime: 0.55,
+  ghostSpeed: 195,
+  ghostRadius: 12,
+  snapSpentRadius: 22,
+});
+
+const WORLD = Object.freeze({
+  w: 2100,
+  h: 980,
+});
+
+function rect(x, y, w, h) {
+  return { x, y, w, h };
 }
 
-function fullHand() {
-  return FULL_HAND.slice();
-}
-
-function firstPlayerForStone(stoneIndex) {
-  // stoneIndex 1..5 → A, B, A, B, A
-  return stoneIndex % 2 === 1 ? "A" : "B";
-}
-
-function opponentOf(player) {
-  return player === "A" ? "B" : "A";
-}
-
-function createStoneState(stoneIndex) {
-  const now = Date.now();
-  const firstPlayer = firstPlayerForStone(stoneIndex);
-  // Лёгкий задел первому: иначе при открытых руках отвечающий на тон забирает темп.
-  const startBias = 1;
-  const position = firstPlayer === "A" ? -startBias : startBias;
+function buildDistrict() {
+  const walls = [
+    rect(0, 0, 2100, 46),
+    rect(0, 934, 2100, 46),
+    rect(0, 0, 46, 980),
+    rect(2054, 0, 46, 980),
+    rect(390, 46, 36, 270),
+    rect(390, 560, 36, 374),
+    rect(1188, 46, 36, 280),
+    rect(1188, 560, 36, 374),
+    rect(620, 700, 36, 234),
+    rect(1000, 700, 36, 234),
+    rect(656, 700, 344, 28),
+    rect(760, 350, 96, 96),
+    rect(1580, 220, 70, 220),
+    rect(1760, 620, 90, 160),
+  ];
+  const lanterns = [
+    { x: 120, y: 90 },
+    { x: 330, y: 90 },
+    { x: 120, y: 880 },
+    { x: 540, y: 90 },
+    { x: 1100, y: 90 },
+    { x: 820, y: 640 },
+    { x: 1320, y: 90 },
+    { x: 1980, y: 90 },
+    { x: 1980, y: 880 },
+    { x: 1320, y: 880 },
+  ];
   return {
-    stoneIndex,
-    position,
-    tone: null,
-    toneLocked: false,
-    currentPlayer: firstPlayer,
-    firstPlayer,
-    hands: { A: fullHand(), B: fullHand() },
-    discards: { A: [], B: [] },
-    moveCount: 0,
-    startedAt: now,
-    maxAbsPositionBeforeLast: 0,
-    moveTypes: { opening: 0, setup: 0, steal: 0, rewrite: 0 },
-    couldStealButDidNot: 0,
-    leftToneOpponentHad: 0,
-    finishedByCenterSteal34: false,
+    walls,
+    lanterns,
+    spawn: { x: 188, y: 448 },
+    exit: rect(70, 330, 250, 230),
+    cargo: { x: 1860, y: 470, r: 16 },
+    leaks: [
+      { x: 820, y: 250, vx: 28, vy: 10 },
+      { x: 780, y: 820, vx: -16, vy: 12 },
+      { x: 1380, y: 470, vx: 10, vy: -22 },
+    ],
   };
 }
 
-function createSession(options = {}) {
-  let resonance = RESONANCE_DOUBLE;
-  if (options.resonance === RESONANCE_PLUS1) {
-    resonance = RESONANCE_PLUS1;
-  } else if (options.resonance === RESONANCE_PLUS2) {
-    resonance = RESONANCE_PLUS2;
-  } else if (options.resonance === RESONANCE_DOUBLE) {
-    resonance = RESONANCE_DOUBLE;
+function cloneLeaks(leaks) {
+  return leaks.map((leak) => ({
+    x: leak.x,
+    y: leak.y,
+    vx: leak.vx,
+    vy: leak.vy,
+    alive: true,
+  }));
+}
+
+function loadGhost() {
+  try {
+    const raw = localStorage.getItem("obvod.lastPath");
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.won || !Array.isArray(parsed.points)) {
+      return [];
+    }
+    return parsed.points
+      .filter((p) => typeof p.x === "number" && typeof p.y === "number")
+      .slice(0, 2400);
+  } catch (error) {
+    return [];
   }
-  const sessionId = options.sessionId || `s-${Date.now()}`;
-  const startedAt = Date.now();
+}
+
+function saveGhost(points, won) {
+  try {
+    localStorage.setItem(
+      "obvod.lastPath",
+      JSON.stringify({
+        won: Boolean(won),
+        points: points.slice(0, 2400),
+      })
+    );
+  } catch (error) {
+    // ignore quota
+  }
+}
+
+function createRun(options = {}) {
+  const district = buildDistrict();
+  const ghostPoints = options.ghostPoints || loadGhost();
   return {
-    sessionId,
-    resonance,
-    resonanceLocked: false,
-    stoneIndex: 1,
-    scores: { A: 0, B: 0 },
-    startedAt,
-    finished: false,
-    winner: null,
-    stone: createStoneState(1),
-    stoneSummaries: [],
-    flags: {
-      sessionTooFast: false,
-      longStones: [],
+    district,
+    player: { x: district.spawn.x, y: district.spawn.y },
+    trail: [],
+    trailLen: 0,
+    seals: [],
+    spent: [],
+    leaks: cloneLeaks(district.leaks),
+    cargo: { x: district.cargo.x, y: district.cargo.y, held: false },
+    collapseX: 0,
+    time: 0,
+    leakTouch: 0,
+    ghostPoints,
+    ghostIndex: 0,
+    ghost: ghostPoints.length
+      ? { x: ghostPoints[0].x, y: ghostPoints[0].y, alive: true }
+      : null,
+    recorded: [],
+    status: "running",
+    failReason: null,
+    lastEvent: null,
+    events: [],
+    stats: {
+      closes: 0,
+      seals: 0,
+      burns: 0,
+      captures: 0,
+      weak: 0,
+      snaps: 0,
+      cancels: 0,
     },
   };
 }
 
-function setResonance(session, resonance) {
-  if (session.resonanceLocked) {
-    return { ok: false, error: "калибровка уже зафиксирована" };
+function emit(run, event) {
+  run.lastEvent = event;
+  run.events.push(event);
+  if (run.events.length > 24) {
+    run.events.shift();
   }
-  if (
-    resonance !== RESONANCE_DOUBLE &&
-    resonance !== RESONANCE_PLUS2 &&
-    resonance !== RESONANCE_PLUS1
-  ) {
-    return { ok: false, error: "неизвестная калибровка" };
-  }
-  session.resonance = resonance;
-  return { ok: true };
 }
 
-function stealShiftFor(card, resonance) {
-  if (resonance === RESONANCE_DOUBLE) {
-    return card * 2;
-  }
-  if (resonance === RESONANCE_PLUS2) {
-    return card + 2;
-  }
-  return card + 1;
-}
-
-function computeShift(card, tone, toneLocked, resonance, isOpening) {
-  // Opening задаёт закрытый тон: ответить кражей нельзя один ход.
-  // Обычный setup из тишины тон не закрывает — иначе жадная политика
-  // «всегда кради» зацикливает камень на рефилах.
-  if (isOpening) {
-    return {
-      shift: card,
-      nextTone: card,
-      nextLocked: true,
-      moveType: "opening",
-    };
-  }
-  if (tone === null) {
-    return {
-      shift: card,
-      nextTone: card,
-      nextLocked: false,
-      moveType: "setup",
-    };
-  }
-  if (card === tone && !toneLocked) {
-    return {
-      shift: stealShiftFor(card, resonance),
-      nextTone: null,
-      nextLocked: false,
-      moveType: "steal",
-    };
-  }
-  return {
-    shift: card,
-    nextTone: card,
-    nextLocked: false,
-    moveType: "rewrite",
-  };
-}
-
-function wouldPushOut(player, position, shift) {
-  if (player === "A") {
-    return position - shift < -EDGE;
-  }
-  return position + shift > EDGE;
-}
-
-function applyShift(player, position, shift) {
-  return player === "A" ? position - shift : position + shift;
-}
-
-function playCard(session, card) {
-  if (session.finished) {
-    return { ok: false, error: "сессия окончена" };
-  }
-  const stone = session.stone;
-  const player = stone.currentPlayer;
-  const hand = stone.hands[player];
-  const cardIndex = hand.indexOf(card);
-  if (cardIndex === -1) {
-    return { ok: false, error: "карты нет в руке" };
-  }
-  if (stone.toneLocked && stone.tone !== null && card === stone.tone && stone.moveCount > 0) {
-    const hasOther = hand.some((value) => value !== stone.tone);
-    if (hasOther) {
-      return { ok: false, error: "тон закрыт — сыграй другое число" };
+function blockedAt(run, x, y, radius, ignoreSeals) {
+  const walls = run.district.walls;
+  for (let i = 0; i < walls.length; i += 1) {
+    if (G.circleHitsAabb(x, y, radius, walls[i])) {
+      return true;
     }
   }
+  if (x < run.collapseX + radius * 0.4) {
+    return true;
+  }
+    if (!ignoreSeals) {
+    const p = { x, y };
+    for (let i = 0; i < run.seals.length; i += 1) {
+      const seal = run.seals[i];
+      if (seal.grace > 0) {
+        continue;
+      }
+      if (G.pointInPolygon(p, seal.poly) && !G.pointInPolygon(run.player, seal.poly)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
-  session.resonanceLocked = true;
+function moveBody(run, body, dx, dy, radius) {
+  const nextX = body.x + dx;
+  if (!blockedAt(run, nextX, body.y, radius, false)) {
+    body.x = nextX;
+  }
+  const nextY = body.y + dy;
+  if (!blockedAt(run, body.x, nextY, radius, false)) {
+    body.y = nextY;
+  }
+  body.x = G.clamp(body.x, 50, WORLD.w - 50);
+  body.y = G.clamp(body.y, 50, WORLD.h - 50);
+}
 
-  const opponent = opponentOf(player);
-  const positionBefore = stone.position;
-  const toneBefore = stone.tone;
-  const handBefore = cloneHand(hand);
-  const opponentHandBefore = cloneHand(stone.hands[opponent]);
+function inSpent(run, p) {
+  for (let i = 0; i < run.spent.length; i += 1) {
+    if (G.pointInPolygon(p, run.spent[i].poly)) {
+      return true;
+    }
+  }
+  return false;
+}
 
-  const couldSteal =
-    toneBefore !== null &&
-    !stone.toneLocked &&
-    hand.includes(toneBefore);
-  const isOpening = stone.moveCount === 0;
-  const { shift, nextTone, nextLocked, moveType } = computeShift(
-    card,
-    toneBefore,
-    stone.toneLocked,
-    session.resonance,
-    isOpening
+function spentOverlap(run, poly) {
+  return G.samplePolygonOverlap(poly, (p) => inSpent(run, p), 8);
+}
+
+function addSpent(run, poly, extraTtl) {
+  run.spent.push({
+    poly: poly.map((p) => ({ x: p.x, y: p.y })),
+    ttl: BALANCE.spentDuration + (extraTtl || 0),
+  });
+  if (run.spent.length > 14) {
+    run.spent.shift();
+  }
+}
+
+function spentAlongTrail(run, points) {
+  const dense = G.densifyPolyline(points, 14);
+  for (let i = 0; i < dense.length; i += 8) {
+    const cluster = [];
+    const c = dense[i];
+    const r = BALANCE.snapSpentRadius;
+    cluster.push({ x: c.x - r, y: c.y });
+    cluster.push({ x: c.x, y: c.y - r });
+    cluster.push({ x: c.x + r, y: c.y });
+    cluster.push({ x: c.x, y: c.y + r });
+    addSpent(run, cluster, -4);
+  }
+}
+
+function snapTrail(run, reason) {
+  if (run.trail.length > 2) {
+    spentAlongTrail(run, run.trail);
+    run.stats.snaps += 1;
+    emit(run, { type: "snap", reason, x: run.player.x, y: run.player.y });
+  }
+  run.trail = [];
+  run.trailLen = 0;
+}
+
+function cancelTrail(run) {
+  if (run.trail.length < 2) {
+    run.trail = [];
+    run.trailLen = 0;
+    return;
+  }
+  run.stats.cancels += 1;
+  snapTrail(run, "cancel");
+}
+
+function classifyInterior(run, poly) {
+  const cargoInside =
+    !run.cargo.held &&
+    G.pointInPolygon({ x: run.cargo.x, y: run.cargo.y }, poly);
+  const leaksInside = [];
+  for (let i = 0; i < run.leaks.length; i += 1) {
+    const leak = run.leaks[i];
+    if (leak.alive && G.pointInPolygon(leak, poly)) {
+      leaksInside.push(leak);
+    }
+  }
+  const ghostInside =
+    run.ghost &&
+    run.ghost.alive &&
+    G.pointInPolygon(run.ghost, poly);
+  return { cargoInside, leaksInside, ghostInside };
+}
+
+function closeLoop(run, startIndex, forced) {
+  const loop = run.trail.slice(startIndex);
+  loop.push({ x: run.player.x, y: run.player.y });
+  if (loop.length < 5) {
+    return false;
+  }
+  const area = G.polygonArea(loop);
+  if (area < BALANCE.minLoopArea) {
+    return false;
+  }
+  const spentRatio = spentOverlap(run, loop);
+  if (spentRatio > 0.42) {
+    emit(run, {
+      type: "reject",
+      reason: "spent",
+      x: run.player.x,
+      y: run.player.y,
+    });
+    return false;
+  }
+  const assist = G.wallAssistRatio(
+    loop,
+    run.district.walls,
+    BALANCE.wallAssistDist
   );
-  const finishingMove = wouldPushOut(player, positionBefore, shift);
-  const positionAfter = applyShift(player, positionBefore, shift);
-
-  hand.splice(cardIndex, 1);
-  stone.discards[player].push(card);
-  let refilled = false;
-  if (hand.length === 0) {
-    stone.hands[player] = fullHand();
-    stone.discards[player] = [];
-    refilled = true;
+  const weak = assist >= BALANCE.wallAssistThreshold;
+  const interior = classifyInterior(run, loop);
+  const threat = interior.leaksInside.length > 0 || interior.ghostInside;
+  let kind = "seal";
+  if (interior.cargoInside && threat) {
+    kind = "mix";
+  } else if (interior.cargoInside) {
+    kind = "capture";
+  } else if (threat) {
+    kind = "burn";
   }
 
-  stone.position = positionAfter;
-  stone.tone = nextTone;
-  stone.toneLocked = nextLocked;
-  stone.moveCount += 1;
-
-  const absBefore = Math.abs(positionBefore);
-  if (stone.moveCount === 1) {
-    stone.maxAbsPositionBeforeLast = 0;
-  } else {
-    stone.maxAbsPositionBeforeLast = Math.max(stone.maxAbsPositionBeforeLast, absBefore);
+  run.stats.closes += 1;
+  if (weak) {
+    run.stats.weak += 1;
   }
 
-  stone.moveTypes[moveType] += 1;
-
-  const couldStealButDidNot = couldSteal && moveType !== "steal";
-  if (couldStealButDidNot) {
-    stone.couldStealButDidNot += 1;
-  }
-
-  let newToneInOpponentHand = null;
-  if (moveType === "setup" || moveType === "rewrite" || moveType === "opening") {
-    newToneInOpponentHand =
-      nextTone !== null && opponentHandBefore.includes(nextTone);
-    if (newToneInOpponentHand && moveType !== "opening") {
-      stone.leftToneOpponentHad += 1;
-    }
-  }
-
-  const stoneFinished = finishingMove;
-  let stoneWinner = null;
-  if (stoneFinished) {
-    stoneWinner = player;
-    if (
-      moveType === "steal" &&
-      positionBefore === 0 &&
-      (toneBefore === 3 || toneBefore === 4)
-    ) {
-      stone.finishedByCenterSteal34 = true;
-    }
-  }
-
-  const moveRecord = {
-    sessionId: session.sessionId,
-    stoneIndex: stone.stoneIndex,
-    moveIndex: stone.moveCount,
-    player,
-    positionBefore,
-    toneBefore,
-    handBefore,
-    opponentHandBefore,
-    card,
-    moveType,
-    shift,
-    positionAfter,
-    toneAfter: nextTone,
-    couldStealButDidNot,
-    newToneInOpponentHand,
-    finishingMove,
-    refilled,
-    stoneFinished,
-    stoneWinner,
-  };
-
-  let stoneSummary = null;
-  let sessionSummary = null;
-
-  if (stoneFinished) {
-    session.scores[player] += 1;
-    const endedAt = Date.now();
-    const durationMs = endedAt - stone.startedAt;
-    stoneSummary = {
-      stoneIndex: stone.stoneIndex,
-      firstPlayer: stone.firstPlayer,
-      winner: stoneWinner,
-      moveCount: stone.moveCount,
-      durationMs,
-      longStone: durationMs > 6 * 60 * 1000,
-      moveTypes: { ...stone.moveTypes },
-      couldStealButDidNot: stone.couldStealButDidNot,
-      leftToneOpponentHad: stone.leftToneOpponentHad,
-      finishedByCenterSteal34: stone.finishedByCenterSteal34,
-      maxAbsPositionBeforeLast: stone.maxAbsPositionBeforeLast,
-    };
-    session.stoneSummaries.push(stoneSummary);
-    if (stoneSummary.longStone) {
-      session.flags.longStones.push(stone.stoneIndex);
-    }
-
-    if (stone.stoneIndex >= STONES_PER_SESSION) {
-      session.finished = true;
-      const scoreA = session.scores.A;
-      const scoreB = session.scores.B;
-      session.winner = scoreA > scoreB ? "A" : "B";
-      const sessionDurationMs = endedAt - session.startedAt;
-      session.flags.sessionTooFast = sessionDurationMs < 10 * 60 * 1000;
-      sessionSummary = {
-        sessionId: session.sessionId,
-        durationMs: sessionDurationMs,
-        scores: { ...session.scores },
-        winner: session.winner,
-        firstStoneStarter: firstPlayerForStone(1),
-        resonance: session.resonance,
-        sessionTooFast: session.flags.sessionTooFast,
-        longStones: session.flags.longStones.slice(),
-        stoneSummaries: session.stoneSummaries.slice(),
-      };
+  if (kind === "seal") {
+    const ttl = weak ? BALANCE.weakSealDuration : BALANCE.sealDuration;
+    run.seals.push({ poly: loop, ttl, weak, grace: 0.25 });
+    run.stats.seals += 1;
+    addSpent(run, loop, 0);
+    emit(run, {
+      type: "seal",
+      weak,
+      forced: Boolean(forced),
+      x: run.player.x,
+      y: run.player.y,
+      area,
+    });
+  } else if (kind === "capture") {
+    if (weak) {
+      emit(run, {
+        type: "weak-capture",
+        x: run.cargo.x,
+        y: run.cargo.y,
+        area,
+      });
+      addSpent(run, loop, -3);
     } else {
-      session.stoneIndex += 1;
-      session.stone = createStoneState(session.stoneIndex);
+      run.cargo.held = true;
+      run.stats.captures += 1;
+      addSpent(run, loop, 0);
+      emit(run, {
+        type: "capture",
+        x: run.cargo.x,
+        y: run.cargo.y,
+        area,
+      });
     }
   } else {
-    stone.currentPlayer = opponent;
+    if (weak) {
+      emit(run, {
+        type: "weak-burn",
+        x: run.player.x,
+        y: run.player.y,
+        area,
+      });
+      addSpent(run, loop, -3);
+    } else {
+      for (let i = 0; i < interior.leaksInside.length; i += 1) {
+        interior.leaksInside[i].alive = false;
+      }
+      if (interior.ghostInside && run.ghost) {
+        run.ghost.alive = false;
+      }
+      run.stats.burns += 1;
+      addSpent(run, loop, 0);
+      emit(run, {
+        type: "burn",
+        x: run.player.x,
+        y: run.player.y,
+        area,
+        ghost: Boolean(interior.ghostInside),
+      });
+    }
   }
 
-  return {
-    ok: true,
-    moveRecord,
-    stoneSummary,
-    sessionSummary,
-    state: getPublicState(session),
-  };
+  run.trail = [];
+  run.trailLen = 0;
+  return true;
 }
 
-function getPublicState(session) {
-  const stone = session.stone;
+function tryClose(run, forcedByGhost) {
+  const idx = G.findClosingIndex(
+    run.trail,
+    run.player,
+    BALANCE.closeRadius,
+    BALANCE.minLoopPath
+  );
+  if (idx < 0) {
+    return false;
+  }
+  return closeLoop(run, idx, forcedByGhost);
+}
+
+function ghostTouchesTrail(run) {
+  if (!run.ghost || !run.ghost.alive || run.trail.length < 6) {
+    return false;
+  }
+  for (let i = 0; i < run.trail.length - 4; i += 3) {
+    if (G.dist(run.ghost, run.trail[i]) <= BALANCE.closeRadius) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function stepGhost(run, dt) {
+  if (!run.ghost || !run.ghost.alive || run.ghostPoints.length < 2) {
+    return;
+  }
+  const pts = run.ghostPoints;
+  let idx = run.ghostIndex;
+  let remaining = BALANCE.ghostSpeed * dt;
+  while (remaining > 0 && idx < pts.length - 1) {
+    const a = pts[idx];
+    const b = pts[idx + 1];
+    const seg = Math.max(0.01, G.dist(a, b));
+    if (remaining >= seg) {
+      remaining -= seg;
+      idx += 1;
+      run.ghost.x = b.x;
+      run.ghost.y = b.y;
+    } else {
+      const t = remaining / seg;
+      run.ghost.x = a.x + (b.x - a.x) * t;
+      run.ghost.y = a.y + (b.y - a.y) * t;
+      remaining = 0;
+    }
+  }
+  run.ghostIndex = idx;
+  if (idx >= pts.length - 1) {
+    run.ghostIndex = 0;
+    run.ghost.x = pts[0].x;
+    run.ghost.y = pts[0].y;
+  }
+}
+
+function bounceLeak(run, leak, dt) {
+  if (!leak.alive) {
+    return;
+  }
+  const nx = leak.x + leak.vx * dt;
+  const ny = leak.y + leak.vy * dt;
+  if (blockedAt(run, nx, leak.y, BALANCE.leakRadius, true) || nx < run.collapseX + 30) {
+    leak.vx *= -1;
+  } else {
+    leak.x = nx;
+  }
+  if (blockedAt(run, leak.x, ny, BALANCE.leakRadius, true)) {
+    leak.vy *= -1;
+  } else {
+    leak.y = ny;
+  }
+}
+
+function finish(run, status, reason) {
+  if (run.status !== "running") {
+    return;
+  }
+  run.status = status;
+  run.failReason = reason || null;
+  const won = status === "won";
+  saveGhost(run.recorded, won);
+  emit(run, { type: status, reason: reason || null, x: run.player.x, y: run.player.y });
+}
+
+function stepRun(run, input, dt) {
+  if (run.status !== "running") {
+    return run.lastEvent;
+  }
+  const sliced = Math.min(dt, 0.05);
+  run.time += sliced;
+
+  if (run.time > BALANCE.collapseDelay) {
+    run.collapseX += BALANCE.collapseSpeed * sliced;
+  }
+
+  if (input.cancel) {
+    cancelTrail(run);
+  }
+
+  const ax = input.ax || 0;
+  const ay = input.ay || 0;
+  const len = Math.hypot(ax, ay) || 1;
+  const dx = (ax / len) * BALANCE.playerSpeed * sliced * (ax || ay ? 1 : 0);
+  const dy = (ay / len) * BALANCE.playerSpeed * sliced * (ax || ay ? 1 : 0);
+  if (ax || ay) {
+    moveBody(run, run.player, dx, dy, BALANCE.playerRadius);
+  }
+
+  run.recorded.push({ x: run.player.x, y: run.player.y });
+  if (run.recorded.length > 2400) {
+    run.recorded.shift();
+  }
+
+  const last = run.trail[run.trail.length - 1];
+  if (!last || G.dist(last, run.player) >= BALANCE.trailSample) {
+    run.trail.push({ x: run.player.x, y: run.player.y });
+    if (run.trail.length > 1) {
+      run.trailLen += G.dist(run.trail[run.trail.length - 2], run.player);
+    }
+  }
+  if (run.trailLen > BALANCE.maxTrailLen) {
+    snapTrail(run, "length");
+  } else {
+    tryClose(run, false);
+  }
+
+  for (let i = run.seals.length - 1; i >= 0; i -= 1) {
+    run.seals[i].ttl -= sliced;
+    run.seals[i].grace = Math.max(0, (run.seals[i].grace || 0) - sliced);
+    if (run.seals[i].ttl <= 0) {
+      run.seals.splice(i, 1);
+    }
+  }
+  for (let i = run.spent.length - 1; i >= 0; i -= 1) {
+    run.spent[i].ttl -= sliced;
+    if (run.spent[i].ttl <= 0) {
+      run.spent.splice(i, 1);
+    }
+  }
+
+  for (let i = 0; i < run.leaks.length; i += 1) {
+    bounceLeak(run, run.leaks[i], sliced);
+  }
+
+  stepGhost(run, sliced);
+  if (ghostTouchesTrail(run)) {
+    const closed = tryClose(run, true);
+    if (!closed) {
+      snapTrail(run, "ghost");
+    }
+  }
+
+  let touchingLeak = false;
+  for (let i = 0; i < run.leaks.length; i += 1) {
+    const leak = run.leaks[i];
+    if (!leak.alive) {
+      continue;
+    }
+    if (G.dist(run.player, leak) < BALANCE.playerRadius + BALANCE.leakRadius) {
+      touchingLeak = true;
+    }
+  }
+  if (touchingLeak) {
+    run.leakTouch += sliced;
+    if (run.leakTouch >= BALANCE.leakTouchTime) {
+      finish(run, "lost", "leak");
+      return run.lastEvent;
+    }
+  } else {
+    run.leakTouch = Math.max(0, run.leakTouch - sliced * 1.6);
+  }
+
+  if (run.player.x < run.collapseX + BALANCE.playerRadius) {
+    finish(run, "lost", "collapse");
+    return run.lastEvent;
+  }
+
+  if (run.cargo.held && G.pointInAabb(run.player, run.district.exit)) {
+    finish(run, "won", null);
+  }
+
+  return run.lastEvent;
+}
+
+function getPublicState(run) {
   return {
-    sessionId: session.sessionId,
-    resonance: session.resonance,
-    resonanceLocked: session.resonanceLocked,
-    stoneIndex: session.stoneIndex,
-    scores: { ...session.scores },
-    finished: session.finished,
-    winner: session.winner,
-    flags: {
-      sessionTooFast: session.flags.sessionTooFast,
-      longStones: session.flags.longStones.slice(),
-    },
-    stone: {
-      stoneIndex: stone.stoneIndex,
-      position: stone.position,
-      tone: stone.tone,
-      toneLocked: stone.toneLocked,
-      currentPlayer: stone.currentPlayer,
-      firstPlayer: stone.firstPlayer,
-      hands: {
-        A: cloneHand(stone.hands.A),
-        B: cloneHand(stone.hands.B),
-      },
-      discards: {
-        A: stone.discards.A.slice(),
-        B: stone.discards.B.slice(),
-      },
-      moveCount: stone.moveCount,
-    },
+    status: run.status,
+    failReason: run.failReason,
+    time: run.time,
+    player: { x: run.player.x, y: run.player.y },
+    trail: run.trail,
+    trailLen: run.trailLen,
+    maxTrailLen: BALANCE.maxTrailLen,
+    seals: run.seals,
+    spent: run.spent,
+    leaks: run.leaks,
+    cargo: run.cargo,
+    collapseX: run.collapseX,
+    ghost: run.ghost,
+    lastEvent: run.lastEvent,
+    stats: { ...run.stats },
+    district: run.district,
+    world: WORLD,
+    balance: BALANCE,
+    hasGhost: Boolean(run.ghost && run.ghost.alive),
   };
 }
 
@@ -372,301 +609,137 @@ function runSelfChecks() {
     }
   }
 
-  function assert(condition, message) {
-    if (!condition) {
+  function assert(cond, message) {
+    if (!cond) {
       throw new Error(message);
     }
   }
 
-  check("opening: задаёт закрытый тон", () => {
-    const session = createSession();
-    assert(session.stone.position === -1, "задел первому A: −1");
-    const result = playCard(session, 2);
-    assert(result.ok, "ход должен пройти");
-    assert(result.moveRecord.moveType === "opening", "ожидался opening");
-    assert(result.moveRecord.shift === 2, "сдвиг должен быть 2");
-    assert(result.moveRecord.toneAfter === 2, "тон задан");
-    assert(session.stone.toneLocked === true, "тон закрыт");
-    assert(result.moveRecord.positionAfter === -3, "−1 − 2 = −3");
-  });
-
-  check("на закрытый тон красть нельзя", () => {
-    const session = createSession();
-    playCard(session, 2);
-    const blocked = playCard(session, 2);
-    assert(blocked.ok === false, "совпадение на закрытом тоне запрещено");
-    const result = playCard(session, 3);
-    assert(result.moveRecord.moveType === "rewrite", "нужен rewrite другим числом");
-    assert(session.stone.toneLocked === false, "замок снят");
-    assert(result.moveRecord.toneAfter === 3, "новый тон 3");
-  });
-
-  check("setup из тишины не закрывает тон", () => {
-    const session = createSession();
-    playCard(session, 1);
-    playCard(session, 3);
-    playCard(session, 3); // steal → silence
-    const result = playCard(session, 2); // setup from silence
-    assert(result.moveRecord.moveType === "setup", "setup");
-    assert(session.stone.toneLocked === false, "обычный setup открыт для кражи");
-  });
-
-  check("после opening чужой удар открывает тон для кражи", () => {
-    const session = createSession();
-    playCard(session, 1); // opening tone 1 locked
-    playCard(session, 3); // rewrite tone 3 open
-    const result = playCard(session, 3); // steal ×2
-    assert(result.moveRecord.moveType === "steal", "ожидался steal");
-    assert(result.moveRecord.shift === 6, "3×2=6");
-    assert(result.moveRecord.toneAfter === null, "тон сгорает");
-  });
-
-  check("steal ×2 и тишина (default)", () => {
-    const session = createSession({ resonance: RESONANCE_DOUBLE });
-    playCard(session, 1);
-    playCard(session, 2);
-    const result = playCard(session, 2);
-    assert(result.moveRecord.moveType === "steal", "ожидался steal");
-    assert(result.moveRecord.shift === 4, "2×2=4");
-    assert(result.moveRecord.toneAfter === null, "тон сгорает");
-  });
-
-  check("steal +1 (калибровка)", () => {
-    const session = createSession({ resonance: RESONANCE_PLUS1 });
-    playCard(session, 1);
-    playCard(session, 2);
-    const result = playCard(session, 2);
-    assert(result.moveRecord.moveType === "steal", "ожидался steal");
-    assert(result.moveRecord.shift === 3, "2+1=3");
-  });
-
-  check("rewrite", () => {
-    const session = createSession();
-    playCard(session, 1);
-    const result = playCard(session, 3);
-    assert(result.moveRecord.moveType === "rewrite", "ожидался rewrite");
-    assert(result.moveRecord.shift === 3, "сдвиг 3");
-    assert(result.moveRecord.toneAfter === 3, "новый тон 3");
-    assert(session.stone.toneLocked === false, "замок снят");
-  });
-
-  check("рефил после 4-й карты", () => {
-    const session = createSession();
-    playCard(session, 1); // A opening
-    playCard(session, 2); // B rewrite
-    playCard(session, 2); // A steal
-    playCard(session, 3); // B setup lock
-    playCard(session, 4); // A rewrite
-    playCard(session, 4); // B steal
-    const result = playCard(session, 3); // A setup — 4-я карта A
-    assert(result.moveRecord.refilled === true, "A должен рефилнуться");
-    assert(
-      JSON.stringify(session.stone.hands.A) === JSON.stringify([1, 2, 3, 4]),
-      "рука A снова 1-4"
-    );
-    assert(session.stone.discards.A.length === 0, "сброс A пуст после рефила");
-  });
-
-  check("победа A", () => {
-    const session = createSession();
-    session.stone.position = -5;
-    session.stone.tone = 2;
-    session.stone.toneLocked = false;
-    session.stone.currentPlayer = "A";
-    session.stone.hands.A = [1, 2, 3, 4];
-    session.stone.moveCount = 2;
-    const result = playCard(session, 2);
-    assert(result.moveRecord.stoneFinished === true, "камень должен кончиться");
-    assert(result.moveRecord.stoneWinner === "A", "победитель A");
-    assert(result.moveRecord.shift === 4, "steal 2×2");
-  });
-
-  check("победа B", () => {
-    const session = createSession();
-    session.stone.position = 5;
-    session.stone.tone = 3;
-    session.stone.toneLocked = false;
-    session.stone.currentPlayer = "B";
-    session.stone.hands.B = [1, 2, 3, 4];
-    session.stone.moveCount = 2;
-    const result = playCard(session, 3);
-    assert(result.moveRecord.stoneFinished === true, "камень должен кончиться");
-    assert(result.moveRecord.stoneWinner === "B", "победитель B");
-    assert(result.moveRecord.shift === 6, "steal 3×2");
-  });
-
-  check("первый ход 5 камней A/B/A/B/A", () => {
-    const starters = [];
-    for (let i = 1; i <= 5; i += 1) {
-      starters.push(firstPlayerForStone(i));
-    }
-    assert(starters.join(",") === "A,B,A,B,A", `получили ${starters.join(",")}`);
-  });
-
-  check("калибровка +2", () => {
-    const session = createSession({ resonance: RESONANCE_PLUS2 });
-    playCard(session, 1);
-    playCard(session, 3);
-    const result = playCard(session, 3);
-    assert(result.moveRecord.moveType === "steal", "steal");
-    assert(result.moveRecord.shift === 5, "3+2=5");
-  });
-
-  check("калибровка не меняется после первого хода", () => {
-    const session = createSession({ resonance: RESONANCE_DOUBLE });
-    playCard(session, 1);
-    const locked = setResonance(session, RESONANCE_PLUS1);
-    assert(locked.ok === false, "смена должна быть запрещена");
-    assert(session.resonance === RESONANCE_DOUBLE, "остаётся double");
-  });
-
-  check("сессия из 5 камней", () => {
-    const session = createSession();
-    let stonesFinished = 0;
-    let guard = 0;
-    while (!session.finished && guard < 500) {
-      guard += 1;
-      const stone = session.stone;
-      const hand = stone.hands[stone.currentPlayer];
-      const hasOther = hand.some((card) => card !== stone.tone);
-      let card = null;
-      for (let i = hand.length - 1; i >= 0; i -= 1) {
-        if (stone.toneLocked && hand[i] === stone.tone && hasOther) {
-          continue;
-        }
-        card = hand[i];
-        break;
-      }
-      assert(card !== null, "нет легальной карты");
-      const result = playCard(session, card);
-      assert(result.ok, result.error || "ход");
-      if (result.stoneSummary) {
-        stonesFinished += 1;
-      }
-    }
-    assert(session.finished === true, "сессия должна закончиться");
-    assert(stonesFinished === 5, `ожидалось 5 камней, получили ${stonesFinished}`);
-    assert(session.scores.A + session.scores.B === 5, "сумма счёта 5");
-  });
-
-  check("жадная кража не зацикливает; humanish не 0/100", () => {
-    function stealElseMax(session) {
-      const st = session.stone;
-      const hand = st.hands[st.currentPlayer];
-      if (st.tone !== null && !st.toneLocked && hand.includes(st.tone)) {
-        return st.tone;
-      }
-      const hasOther = hand.some((card) => card !== st.tone);
-      const legal = hand.filter(
-        (card) => !(st.toneLocked && card === st.tone && hasOther)
-      );
-      return Math.max(...(legal.length ? legal : hand));
-    }
-
-    function humanish(session) {
-      const st = session.stone;
-      const player = st.currentPlayer;
-      const hand = st.hands[player].slice();
-      const opp = player === "A" ? "B" : "A";
-      const oppHand = st.hands[opp];
-      const tone = st.tone;
-      const pos = st.position;
-      const res = session.resonance;
-      function shiftFor(card) {
-        if (st.moveCount === 0) {
-          return card;
-        }
-        if (tone === null) {
-          return card;
-        }
-        if (card === tone && !st.toneLocked) {
-          return stealShiftFor(card, res);
-        }
-        return card;
-      }
-      const hasOther = hand.some((card) => card !== tone);
-      const legal = hand.filter(
-        (card) => !(st.toneLocked && card === tone && hasOther)
-      );
-      for (const card of [...legal].sort((a, b) => b - a)) {
-        const finish =
-          player === "A"
-            ? pos - shiftFor(card) < -EDGE
-            : pos + shiftFor(card) > EDGE;
-        if (finish) {
-          return card;
-        }
-      }
-      if (st.moveCount === 0) {
-        const small = legal.filter((card) => card <= 2);
-        return small.length
-          ? small[Math.floor(Math.random() * small.length)]
-          : legal[0];
-      }
-      const behind = player === "A" ? pos > 0 : pos < 0;
-      if (behind && tone !== null && !st.toneLocked && legal.includes(tone)) {
-        return tone;
-      }
-      const nonSteal = legal.filter((card) => card !== tone || st.toneLocked);
-      const pool = nonSteal.length ? nonSteal : legal;
-      const dead = pool.filter((card) => !oppHand.includes(card));
-      if (dead.length && Math.random() < 0.65) {
-        return dead[Math.floor(Math.random() * dead.length)];
-      }
-      return pool[Math.floor(Math.random() * pool.length)];
-    }
-
-    for (let i = 0; i < 10; i += 1) {
-      const session = createSession({ resonance: RESONANCE_DOUBLE });
-      let guard = 0;
-      while (!session.finished && guard < 400) {
-        guard += 1;
-        const result = playCard(session, stealElseMax(session));
-        assert(result.ok, result.error || "ход");
-      }
-      assert(
-        session.finished === true,
-        `жадный завис на сессии ${i}, ходов ${guard}`
+  function walkTo(run, target, guard) {
+    let n = 0;
+    while (n < guard && G.dist(run.player, target) > 10) {
+      n += 1;
+      stepRun(
+        run,
+        {
+          ax: target.x - run.player.x,
+          ay: target.y - run.player.y,
+          cancel: false,
+        },
+        0.02
       );
     }
+  }
 
-    let firstWins = 0;
-    let stones = 0;
-    for (let i = 0; i < 80; i += 1) {
-      const session = createSession({ resonance: RESONANCE_DOUBLE });
-      while (!session.finished) {
-        const firstPlayer = session.stone.firstPlayer;
-        const result = playCard(session, humanish(session));
-        assert(result.ok, result.error || "ход");
-        if (result.stoneSummary) {
-          stones += 1;
-          if (result.stoneSummary.winner === firstPlayer) {
-            firstWins += 1;
-          }
-        }
-      }
+  function walkSquare(run, cx, cy, half) {
+    const corners = [
+      { x: cx - half, y: cy - half },
+      { x: cx + half, y: cy - half },
+      { x: cx + half, y: cy + half },
+      { x: cx - half, y: cy + half },
+      { x: cx - half, y: cy - half },
+    ];
+    run.player.x = corners[0].x;
+    run.player.y = corners[0].y;
+    run.trail = [{ x: corners[0].x, y: corners[0].y }];
+    run.trailLen = 0;
+    for (let c = 1; c < corners.length; c += 1) {
+      walkTo(run, corners[c], 400);
     }
-    const rate = firstWins / stones;
-    assert(
-      rate > 0.35 && rate < 0.65,
-      `humanish first-win rate ${rate} вне коридора`
-    );
+    walkTo(run, corners[0], 80);
+  }
+
+  check("микрокруг не замыкается", () => {
+    const run = createRun({ ghostPoints: [] });
+    walkSquare(run, run.player.x, run.player.y, 18);
+    assert(run.stats.closes === 0, `закрытий ${run.stats.closes}`);
+  });
+
+  check("пустой контур → печать", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.player.x = 240;
+    run.player.y = 240;
+    run.trail = [];
+    walkSquare(run, 240, 240, 70);
+    assert(run.stats.seals >= 1, "должна быть печать");
+    assert(run.seals.length >= 1, "печать жива");
+  });
+
+  check("контур вокруг течи → выжигание", () => {
+    const run = createRun({ ghostPoints: [] });
+    const leak = run.leaks[0];
+    leak.vx = 0;
+    leak.vy = 0;
+    run.player.x = leak.x - 80;
+    run.player.y = leak.y - 80;
+    run.trail = [];
+    walkSquare(run, leak.x, leak.y, 80);
+    assert(run.stats.burns >= 1, "ожидалось выжигание");
+    assert(leak.alive === false, "течь должна сгореть");
+  });
+
+  check("контур вокруг груза → захват", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    run.player.x = run.cargo.x - 80;
+    run.player.y = run.cargo.y - 80;
+    run.trail = [];
+    walkSquare(run, run.cargo.x, run.cargo.y, 80);
+    assert(run.cargo.held === true, "груз должен взяться");
+    assert(run.stats.captures >= 1, "захват");
+  });
+
+  check("смесь груз+течь не берёт груз", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.leaks.forEach((leak) => {
+      leak.alive = false;
+    });
+    const leak = run.leaks[0];
+    leak.alive = true;
+    leak.x = run.cargo.x + 10;
+    leak.y = run.cargo.y;
+    leak.vx = 0;
+    leak.vy = 0;
+    run.player.x = run.cargo.x - 90;
+    run.player.y = run.cargo.y - 90;
+    run.trail = [];
+    walkSquare(run, run.cargo.x, run.cargo.y, 90);
+    assert(run.cargo.held === false, "смесь не должна брать груз");
+    assert(leak.alive === false, "течь выжигается");
+  });
+
+  check("переполнение длины рвёт черту", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.player.x = 200;
+    run.player.y = 200;
+    for (let i = 0; i < 220; i += 1) {
+      stepRun(run, { ax: 1, ay: 0.02, cancel: false }, 0.05);
+    }
+    assert(run.stats.snaps >= 1 || run.trailLen < BALANCE.maxTrailLen + 40, "должен быть срыв");
+  });
+
+  check("отмирание убивает слева", () => {
+    const run = createRun({ ghostPoints: [] });
+    run.collapseX = 400;
+    run.player.x = 200;
+    stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.05);
+    assert(run.status === "lost", "должен проиграть отмиранию");
+    assert(run.failReason === "collapse", run.failReason);
   });
 
   return results;
 }
 
-window.TokachRules = {
-  FULL_HAND,
-  STONES_PER_SESSION,
-  EDGE,
-  RESONANCE_DOUBLE,
-  RESONANCE_PLUS2,
-  RESONANCE_PLUS1,
-  createSession,
-  setResonance,
-  playCard,
+window.ObvodRules = {
+  BALANCE,
+  WORLD,
+  createRun,
+  stepRun,
   getPublicState,
-  firstPlayerForStone,
   runSelfChecks,
+  buildDistrict,
+  loadGhost,
+  saveGhost,
 };
