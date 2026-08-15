@@ -5,57 +5,186 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Толкач — прототип</title>
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      margin: 16px;
-      max-width: 720px;
-      line-height: 1.4;
+    :root {
+      --ink: #1a2332;
+      --muted: #5a6578;
+      --line: #c5ced9;
+      --paper: #f3f6fa;
+      --a: #0b6e4f;
+      --a-soft: #d8f0e6;
+      --b: #1d4f91;
+      --b-soft: #d9e6f8;
+      --warn: #9a3412;
+      --warn-soft: #ffe8d6;
+      --steal: #7a1f2b;
+      --steal-soft: #fde2e6;
+      --tone: #245b6b;
+      --tone-soft: #d7eef3;
     }
-    h1 { font-size: 1.25rem; margin: 0 0 8px; }
+    body {
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      margin: 16px;
+      max-width: 760px;
+      line-height: 1.4;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at top left, #e8f2ff 0%, transparent 45%),
+        radial-gradient(ellipse at bottom right, #e7f6ef 0%, transparent 40%),
+        var(--paper);
+    }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; letter-spacing: -0.02em; }
     .row { margin: 8px 0; }
     .board {
       display: flex;
-      gap: 2px;
+      gap: 3px;
       margin: 12px 0;
       flex-wrap: nowrap;
     }
     .cell {
-      width: 40px;
-      height: 40px;
-      border: 1px solid #333;
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       text-align: center;
-      line-height: 40px;
+      line-height: 42px;
       font-size: 12px;
+      background: #fff;
+      color: var(--muted);
     }
-    .cell.stone { background: #ccc; font-weight: bold; }
-    .cell.edge { background: #eee; }
+    .cell.stone {
+      background: var(--ink);
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--ink);
+    }
+    .cell.edge { background: #eef2f7; }
+    .cell.neg-side { background: linear-gradient(180deg, #fff, var(--a-soft)); }
+    .cell.pos-side { background: linear-gradient(180deg, #fff, var(--b-soft)); }
     button {
-      font-size: 1.1rem;
-      min-width: 44px;
-      min-height: 44px;
+      font-size: 1.05rem;
+      min-width: 52px;
+      min-height: 52px;
       margin: 2px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
     }
-    button:disabled { opacity: 0.4; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .card-btn {
+      position: relative;
+      font-weight: 700;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+    .card-btn:not(:disabled):hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(26, 35, 50, 0.12);
+    }
+    .card-btn.steal-ready {
+      background: var(--steal-soft);
+      border-color: var(--steal);
+      color: var(--steal);
+      box-shadow: 0 0 0 2px rgba(122, 31, 43, 0.15);
+    }
+    .card-btn.steal-ready::after {
+      content: "×2";
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      font-size: 10px;
+      line-height: 1;
+      padding: 3px 5px;
+      border-radius: 999px;
+      background: var(--steal);
+      color: #fff;
+    }
+    .card-btn.locked-match {
+      opacity: 1;
+      background: var(--warn-soft);
+      border-style: dashed;
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+    .card-btn.locked-match::after {
+      content: "замок";
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+      background: var(--warn);
+      color: #fff;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
     .hands {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
     }
     .panel {
-      border: 1px solid #999;
-      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.72);
     }
-    .panel.active { border-width: 2px; border-color: #000; }
-    #lastMove { min-height: 1.4em; color: #333; }
+    .panel.active {
+      border-width: 2px;
+      border-color: var(--ink);
+      box-shadow: 0 8px 18px rgba(26, 35, 50, 0.08);
+    }
+    #panelA.active { border-color: var(--a); background: var(--a-soft); }
+    #panelB.active { border-color: var(--b); background: var(--b-soft); }
+    #toneBanner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-weight: 600;
+    }
+    #toneBanner.silent { background: #fff; color: var(--muted); }
+    #toneBanner.locked {
+      background: var(--warn-soft);
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+    #toneBanner.open {
+      background: var(--tone-soft);
+      border-color: var(--tone);
+      color: var(--tone);
+    }
+    #toneBanner .hint {
+      font-weight: 500;
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+    #decisionHint {
+      min-height: 1.3em;
+      margin: 4px 0 8px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    #lastMove { min-height: 1.4em; color: var(--ink); }
     #notesForm, #sessionEnd { display: none; }
     label { display: block; margin: 6px 0; }
     textarea { width: 100%; min-height: 48px; }
-    .muted { color: #555; font-size: 0.9rem; }
-    #selfCheckOut { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    #selfCheckOut { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+    @media (max-width: 640px) {
+      .cell { width: 28px; height: 28px; line-height: 28px; font-size: 10px; }
+      .hands { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>Толкач — прототип v0.1</h1>
+  <h1>Толкач — прототип v0.2</h1>
   <p class="muted">Двое на одном устройстве. Старт со смещением 1 к первому. Opening задаёт закрытый тон. Кража по умолчанию ×2.</p>
 
   <div class="row" id="controlsTop">
@@ -73,8 +202,13 @@
   <div class="row" id="statusRow">
     <div>Камень <strong id="stoneNum">1</strong> / 5 · Счёт A <strong id="scoreA">0</strong> : <strong id="scoreB">0</strong> B</div>
     <div>Ход: игрок <strong id="currentPlayer">A</strong> (A ← минус, B → плюс)</div>
-    <div>Тон: <strong id="toneLabel">молчит</strong></div>
   </div>
+
+  <div id="toneBanner" class="silent" role="status" aria-live="polite">
+    <span id="toneLabel">Тон молчит</span>
+    <span class="hint" id="toneHint">первый удар задаст закрытый тон</span>
+  </div>
+  <div id="decisionHint">—</div>
 
   <div class="board" id="board" aria-label="Поле"></div>
 

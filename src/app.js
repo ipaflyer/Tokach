@@ -17,6 +17,9 @@ const els = {
   scoreB: document.getElementById("scoreB"),
   currentPlayer: document.getElementById("currentPlayer"),
   toneLabel: document.getElementById("toneLabel"),
+  toneHint: document.getElementById("toneHint"),
+  toneBanner: document.getElementById("toneBanner"),
+  decisionHint: document.getElementById("decisionHint"),
   board: document.getElementById("board"),
   lastMove: document.getElementById("lastMove"),
   handA: document.getElementById("handA"),
@@ -48,6 +51,53 @@ function formatTone(tone, locked) {
     return "молчит";
   }
   return locked ? `${tone} (закрыт)` : String(tone);
+}
+
+function updateToneBanner(tone, locked) {
+  els.toneBanner.classList.remove("silent", "locked", "open");
+  if (tone === null) {
+    els.toneBanner.classList.add("silent");
+    els.toneLabel.textContent = "Тон молчит";
+    els.toneHint.textContent = "первый удар задаст закрытый тон";
+    return;
+  }
+  if (locked) {
+    els.toneBanner.classList.add("locked");
+    els.toneLabel.textContent = `Тон ${tone} · закрыт`;
+    els.toneHint.textContent = "совпадение запрещено — сыграй другое число";
+    return;
+  }
+  els.toneBanner.classList.add("open");
+  els.toneLabel.textContent = `Тон ${tone} · открыт`;
+  els.toneHint.textContent = "совпадение = кража ×2, иначе перепись";
+}
+
+function updateDecisionHint(state) {
+  if (state.finished) {
+    els.decisionHint.textContent = "сессия окончена — заполни заметки плейтеста";
+    return;
+  }
+  const stone = state.stone;
+  const hand = stone.hands[stone.currentPlayer];
+  if (stone.tone === null) {
+    els.decisionHint.textContent =
+      stone.moveCount === 0
+        ? "Opening: сила удара станет закрытым тоном"
+        : "Тишина: любой удар — setup, тон откроется";
+    return;
+  }
+  if (stone.toneLocked) {
+    const blocked = hand.includes(stone.tone) && hand.some((card) => card !== stone.tone);
+    els.decisionHint.textContent = blocked
+      ? `Замок: карта ${stone.tone} недоступна, пока есть другое число`
+      : `Замок: в руке только ${stone.tone} — можно сыграть (unlock через rewrite)`;
+    return;
+  }
+  if (hand.includes(stone.tone)) {
+    els.decisionHint.textContent = `Развилка: украсть ${stone.tone} (×2) или переписать другим числом`;
+    return;
+  }
+  els.decisionHint.textContent = `Перепись: тон ${stone.tone} в руке нет — ставь свой крючок`;
 }
 
 function describeMove(record) {
@@ -83,6 +133,11 @@ function buildBoard(position) {
     if (cell === -6 || cell === 6) {
       div.classList.add("edge");
     }
+    if (cell < 0) {
+      div.classList.add("neg-side");
+    } else if (cell > 0) {
+      div.classList.add("pos-side");
+    }
     if (cell === position) {
       div.classList.add("stone");
       div.textContent = "●";
@@ -102,14 +157,37 @@ function buildButtons(container, player, hand, enabled, tone, toneLocked) {
   for (let card = 1; card <= 4; card += 1) {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.className = "card-btn";
     btn.textContent = String(card);
     const hasCard = hand.includes(card);
     const blockedByLock = toneLocked && tone !== null && card === tone && hasOther;
-    btn.disabled = !enabled || !hasCard || blockedByLock;
-    if (blockedByLock) {
-      btn.title = "тон закрыт";
+    const stealReady =
+      enabled &&
+      hasCard &&
+      !toneLocked &&
+      tone !== null &&
+      card === tone;
+    const inactiveOrMissing = !enabled || !hasCard;
+    btn.disabled = inactiveOrMissing || blockedByLock;
+    if (enabled && blockedByLock) {
+      btn.classList.add("locked-match");
+      btn.title = "тон закрыт — сыграй другое число";
+      btn.setAttribute("aria-label", `карта ${card}, замок тона`);
+      // disabled не кликается — оставляем клик только для объяснения
+      btn.disabled = false;
+      btn.setAttribute("aria-disabled", "true");
+      btn.addEventListener("click", () => {
+        lastMoveText = `Тон ${tone} закрыт: карту ${card} сыграть нельзя, пока в руке есть другое число`;
+        els.lastMove.textContent = lastMoveText;
+      });
+    } else if (stealReady) {
+      btn.classList.add("steal-ready");
+      btn.title = "кража: сдвиг ×2, тон сгорит";
+      btn.setAttribute("aria-label", `карта ${card}, доступна кража`);
+      btn.addEventListener("click", () => onPlay(card));
+    } else {
+      btn.addEventListener("click", () => onPlay(card));
     }
-    btn.addEventListener("click", () => onPlay(card));
     container.appendChild(btn);
   }
 }
@@ -122,7 +200,8 @@ function render() {
   els.scoreA.textContent = String(state.scores.A);
   els.scoreB.textContent = String(state.scores.B);
   els.currentPlayer.textContent = state.finished ? "—" : stone.currentPlayer;
-  els.toneLabel.textContent = formatTone(stone.tone, stone.toneLocked);
+  updateToneBanner(stone.tone, stone.toneLocked);
+  updateDecisionHint(state);
   els.lastMove.textContent = lastMoveText;
 
   els.resonanceSelect.value = state.resonance;
