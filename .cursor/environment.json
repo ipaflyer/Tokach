@@ -1,0 +1,17 @@
+{
+  "name": "Obvod",
+  "install": "echo \"Обвод: static HTML, зависимостей нет\"",
+  "ports": [
+    {
+      "name": "game",
+      "port": 8765
+    }
+  ],
+  "terminals": [
+    {
+      "name": "game-server",
+      "command": "python3 serve.py",
+      "description": "HTTP сервер Обвода на 0.0.0.0:8765 из корня репозитория"
+    }
+  ]
+}

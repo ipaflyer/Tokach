@@ -3,168 +3,167 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Толкач — прототип</title>
+  <title>Обвод</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%235eead4'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      margin: 16px;
-      max-width: 720px;
-      line-height: 1.4;
+    :root {
+      --ink: #e8f6ff;
+      --muted: #9bb0c9;
+      --cyan: #5eead4;
+      --gold: #ffd166;
+      --pink: #e879f9;
     }
-    h1 { font-size: 1.25rem; margin: 0 0 8px; }
-    .row { margin: 8px 0; }
-    .board {
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #070815;
+      color: var(--ink);
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    }
+    canvas { display: block; }
+    #hud {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+    .top {
+      position: absolute;
+      left: 20px;
+      top: 14px;
       display: flex;
-      gap: 2px;
-      margin: 12px 0;
-      flex-wrap: nowrap;
+      flex-direction: column;
+      gap: 8px;
     }
-    .cell {
-      width: 40px;
-      height: 40px;
-      border: 1px solid #333;
-      text-align: center;
-      line-height: 40px;
-      font-size: 12px;
+    .brand {
+      font-size: 22px;
+      letter-spacing: 0.28em;
+      font-weight: 800;
+      color: #ecfeff;
+      text-shadow: 0 0 18px rgba(94, 234, 212, 0.65);
     }
-    .cell.stone { background: #ccc; font-weight: bold; }
-    .cell.edge { background: #eee; }
-    button {
-      font-size: 1.1rem;
-      min-width: 44px;
-      min-height: 44px;
-      margin: 2px;
+    .trail {
+      width: 240px;
+      height: 10px;
+      border: 1px solid rgba(94, 234, 212, 0.5);
+      background: rgba(8, 16, 32, 0.7);
+      overflow: hidden;
     }
-    button:disabled { opacity: 0.4; }
-    .hands {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+    #trailFill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #22d3ee, #a3e635);
+      box-shadow: 0 0 12px #22d3ee;
     }
-    .panel {
-      border: 1px solid #999;
-      padding: 8px;
+    #eventLog {
+      font-size: 15px;
+      color: #fef9c3;
+      text-shadow: 0 1px 8px #000;
+      min-height: 1.2em;
     }
-    .panel.active { border-width: 2px; border-color: #000; }
-    #lastMove { min-height: 1.4em; color: #333; }
-    #notesForm, #sessionEnd { display: none; }
-    label { display: block; margin: 6px 0; }
-    textarea { width: 100%; min-height: 48px; }
-    .muted { color: #555; font-size: 0.9rem; }
-    #selfCheckOut { white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+    .bottom {
+      position: absolute;
+      left: 20px;
+      bottom: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    #cargoState.held { color: var(--gold); }
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(94, 234, 212, 0.12), transparent 28%),
+        radial-gradient(circle at 80% 70%, rgba(232, 121, 249, 0.12), transparent 30%),
+        rgba(5, 7, 16, 0.38);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    #overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .card {
+      width: min(520px, 92vw);
+      padding: 28px 30px 24px;
+      background: linear-gradient(180deg, rgba(24, 32, 64, 0.95), rgba(12, 16, 32, 0.95));
+      border: 1px solid rgba(94, 234, 212, 0.35);
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.45), 0 0 40px rgba(94, 234, 212, 0.12);
+    }
+    .card h1 {
+      margin: 0 0 8px;
+      letter-spacing: 0.32em;
+      font-size: 28px;
+    }
+    .card p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .card button, #selfCheckBtn {
+      pointer-events: auto;
+      border: 0;
+      cursor: pointer;
+      padding: 10px 16px;
+      background: #5eead4;
+      color: #042f2e;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+    .card button:hover { filter: brightness(1.08); }
+    #selfCheckBtn {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      pointer-events: auto;
+      background: rgba(15, 23, 42, 0.8);
+      color: #cbd5e1;
+      border: 1px solid #334155;
+      font-weight: 600;
+    }
+    #selfCheckOut {
+      position: fixed;
+      right: 16px;
+      bottom: 56px;
+      max-width: 420px;
+      white-space: pre-wrap;
+      font: 12px/1.35 ui-monospace, monospace;
+      color: #cbd5e1;
+      pointer-events: none;
+      text-shadow: 0 1px 6px #000;
+    }
   </style>
 </head>
 <body>
-  <h1>Толкач — прототип v0.1</h1>
-  <p class="muted">Двое на одном устройстве. Старт со смещением 1 к первому. Opening задаёт закрытый тон. Кража по умолчанию ×2.</p>
-
-  <div class="row" id="controlsTop">
-    <label>
-      Резонанс кражи (до первого хода):
-      <select id="resonanceSelect">
-        <option value="double" selected>×2 (по умолчанию)</option>
-        <option value="plus1">карта + 1</option>
-        <option value="plus2">карта + 2</option>
-      </select>
-    </label>
-    <button type="button" id="newSessionBtn">Новая сессия</button>
-  </div>
-
-  <div class="row" id="statusRow">
-    <div>Камень <strong id="stoneNum">1</strong> / 5 · Счёт A <strong id="scoreA">0</strong> : <strong id="scoreB">0</strong> B</div>
-    <div>Ход: игрок <strong id="currentPlayer">A</strong> (A ← минус, B → плюс)</div>
-    <div>Тон: <strong id="toneLabel">молчит</strong></div>
-  </div>
-
-  <div class="board" id="board" aria-label="Поле"></div>
-
-  <div class="row" id="lastMove">—</div>
-
-  <div class="hands">
-    <div class="panel" id="panelA">
-      <div><strong>Игрок A</strong> (в ←)</div>
-      <div>Рука: <span id="handA"></span></div>
-      <div>Сброс: <span id="discardA">—</span></div>
-      <div id="buttonsA"></div>
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <div class="top">
+      <div class="brand">ОБВОД</div>
+      <div class="trail" title="длина черты"><div id="trailFill"></div></div>
+      <div id="eventLog">замкни черту — дом ответит</div>
     </div>
-    <div class="panel" id="panelB">
-      <div><strong>Игрок B</strong> (в →)</div>
-      <div>Рука: <span id="handB"></span></div>
-      <div>Сброс: <span id="discardB">—</span></div>
-      <div id="buttonsB"></div>
+    <div class="bottom">
+      <div id="cargoState">груз в кладовой</div>
+      <div id="hint">WASD / стрелки — идти · Пробел — бросить черту</div>
     </div>
   </div>
-
-  <div id="sessionEnd" class="row">
-    <p><strong>Сессия окончена.</strong> Победитель: <span id="winnerLabel"></span>. Счёт <span id="finalScore"></span>.</p>
+  <div id="overlay">
+    <div class="card">
+      <h1 id="overlayTitle">ОБВОД</h1>
+      <p id="overlayText">Ты ведёшь черту ногами. Замкни контур — дом прочитает, что внутри: пустота станет печатью, сгусток сгорит, груз возьмётся. Сзади район отмирает. Выйди с грузом тем же входом.</p>
+      <button type="button" id="overlayBtn">Идти</button>
+    </div>
   </div>
-
-  <form id="notesForm" class="row">
-    <p><strong>Заметки плейтеста</strong> (для лога)</p>
-    <label>
-      Назвали сами шаблон «в погоне кради, впереди трави»?
-      <select name="namedHeuristicThemselves" required>
-        <option value="">—</option>
-        <option value="yes">да</option>
-        <option value="no">нет</option>
-      </select>
-    </label>
-    <label>
-      Просили обрыв / пятёрку / скрытые карты / «ещё систем»?
-      <select name="askedForMoreSystems" required>
-        <option value="">—</option>
-        <option value="yes">да</option>
-        <option value="no">нет</option>
-      </select>
-    </label>
-    <label>
-      Если да — что именно:
-      <input type="text" name="askedForMoreSystemsDetail" />
-    </label>
-    <label>
-      Спорили о конкретном ходе?
-      <select name="disputedSpecificMove" required>
-        <option value="">—</option>
-        <option value="yes">да</option>
-        <option value="no">нет</option>
-      </select>
-    </label>
-    <label>
-      Цитата / камень.ход (например 3.7):
-      <input type="text" name="disputeStoneMove" />
-    </label>
-    <label>
-      Цитата спора:
-      <textarea name="disputeQuote"></textarea>
-    </label>
-    <label>
-      Ощущение:
-      <select name="feeling" required>
-        <option value="">—</option>
-        <option value="pushed">«я его толкнул»</option>
-        <option value="counted">«мы считали карты»</option>
-        <option value="mixed">смешанно</option>
-      </select>
-    </label>
-    <label>
-      Хотели сразу ещё сессию?
-      <select name="wantedAnotherSession" required>
-        <option value="">—</option>
-        <option value="yes">да</option>
-        <option value="no">нет</option>
-      </select>
-    </label>
-    <button type="submit">Сохранить лог (скачать JSON)</button>
-  </form>
-
-  <hr />
-  <div class="row muted">
-    <button type="button" id="selfCheckBtn">Самопроверки правил</button>
-    <div id="selfCheckOut"></div>
-  </div>
-
+  <pre id="selfCheckOut"></pre>
+  <button type="button" id="selfCheckBtn">Самопроверки</button>
+  <script src="src/geometry.js"></script>
   <script src="src/rules.js"></script>
-  <script src="src/log.js"></script>
   <script src="src/app.js"></script>
 </body>
 </html>
