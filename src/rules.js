@@ -73,7 +73,7 @@ function buildDistrict() {
     exit: rect(70, 330, 250, 230),
     cargo: { x: 1860, y: 470, r: 16 },
     leaks: [
-      { x: 820, y: 250, vx: 28, vy: 10 },
+      { x: 252, y: 640, vx: 20, vy: 16 },
       { x: 780, y: 820, vx: -16, vy: 12 },
       { x: 1380, y: 470, vx: 10, vy: -22 },
     ],
