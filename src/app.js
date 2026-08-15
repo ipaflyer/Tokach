@@ -97,7 +97,7 @@ function react(event) {
     "weak-burn": "слабо — слишком много стен",
     "weak-capture": "слабо — груз не взялся",
     snap: event.reason === "cancel" ? "черта брошена" : "черта лопнула",
-    reject: "пол уже потрачен",
+    "leak-warn": "обводи — не стой в сгустке",
     won: "ты вышел с грузом",
     lost:
       event.reason === "collapse"
@@ -127,6 +127,9 @@ function react(event) {
   } else if (event.type === "snap") {
     burst(event.x, event.y, "#94a3b8", 12);
     blip(90, 0.22, "square");
+  } else if (event.type === "leak-warn") {
+    burst(event.x, event.y, "#86efac", 8);
+    blip(180, 0.12, "sine");
   } else if (event.type === "won") {
     blip(523, 0.3, "triangle");
   } else if (event.type === "lost") {

@@ -22,7 +22,7 @@ const BALANCE = Object.freeze({
   collapseSpeed: 7.4,
   leakSpeed: 42,
   leakRadius: 20,
-  leakTouchTime: 0.55,
+  leakTouchTime: 1.6,
   ghostSpeed: 195,
   ghostRadius: 12,
   snapSpentRadius: 22,
@@ -559,7 +559,15 @@ function stepRun(run, input, dt) {
     }
   }
   if (touchingLeak) {
+    const wasSafe = run.leakTouch <= 0;
     run.leakTouch += sliced;
+    if (wasSafe) {
+      emit(run, {
+        type: "leak-warn",
+        x: run.player.x,
+        y: run.player.y,
+      });
+    }
     if (run.leakTouch >= BALANCE.leakTouchTime) {
       finish(run, "lost", "leak");
       return run.lastEvent;
@@ -797,6 +805,24 @@ function runSelfChecks() {
     const hint = getPublicState(run).closeHint;
     assert(hint !== null, "на длинной черте должна быть точка замыкания");
     assert(Math.abs(hint.x - run.trail[0].x) < 1, "точка — начало черты");
+  });
+
+  check("касание сгустка не убивает сразу", () => {
+    const run = createRun({ ghostPoints: [] });
+    const leak = run.leaks[0];
+    leak.vx = 0;
+    leak.vy = 0;
+    run.player.x = leak.x;
+    run.player.y = leak.y;
+    for (let i = 0; i < 40; i += 1) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.02);
+    }
+    assert(run.status === "running", `после 0.8с статус ${run.status}`);
+    for (let i = 0; i < 60; i += 1) {
+      stepRun(run, { ax: 0, ay: 0, cancel: false }, 0.02);
+    }
+    assert(run.status === "lost", "долгое стояние в сгустке должно убивать");
+    assert(run.failReason === "leak", run.failReason);
   });
 
   return results;
